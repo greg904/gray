@@ -1,11 +1,11 @@
-use core::f32;
-use core::time::Duration;
-
+use std::f32;
 use std::sync::Arc;
 use std::sync::Condvar;
 use std::sync::Mutex;
 use std::sync::RwLock;
 use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
 use glam::DMat2;
 use glam::DVec2;
@@ -566,8 +566,21 @@ fn main() {
         worker_bufs.push(buf);
     }
 
-    window.limit_update_rate(Some(Duration::from_millis(16)));
+    let mut timer = Instant::now();
+    let mut render_cnt = 0;
+
     while window.is_open() {
+        if render_cnt >= 40 {
+            let now = Instant::now();
+            eprintln!(
+                "render time: {}ms",
+                ((now - timer) / render_cnt).as_millis()
+            );
+            timer = now;
+            render_cnt = 0;
+        }
+        render_cnt += 1;
+
         theta += 0.05f32;
 
         {
