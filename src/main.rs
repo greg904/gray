@@ -31,7 +31,28 @@ struct Ray {
     dir: DVec3,
 }
 
+fn random_unit_vector_in_hemisphere(center: DVec3, rng: &mut SmallRng) -> DVec3 {
+    let v = UnitSphere.sample(rng);
+    let mut v = DVec3::new(v[0], v[1], v[2]);
+    // Make sure that the vector is in the hemisphere.
+    if v.dot(center) < 0. {
+        v = -v;
+    }
+    v
+}
+
 impl Ray {
+    fn from_origin_and_random_direction_in_hemisphere(
+        origin: DVec3,
+        center: DVec3,
+        rng: &mut SmallRng,
+    ) -> Self {
+        Self {
+            origin,
+            dir: random_unit_vector_in_hemisphere(center, rng),
+        }
+    }
+
     fn point_from_t(&self, t: f64) -> DVec3 {
         self.origin + t * self.dir
     }
@@ -253,28 +274,47 @@ struct Hit<'a> {
     obj_info: HitObjectInfo<'a>,
 }
 
+impl<'a> Hit<'a> {
+    fn intersection_normal_albedo(&self, ray: &Ray) -> (DVec3, DVec3, Vec3) {
+        match self.obj_info {
+            HitObjectInfo::Sphere(sphere) => {
+                let intersection = ray.point_from_t(self.t);
+                let normal = (intersection - sphere.center).normalize();
+                (intersection, normal, sphere.mat.albedo)
+            }
+            HitObjectInfo::Triangle {
+                triangle,
+                xyz,
+                uv: _uv,
+            } => (xyz, triangle.normal, triangle.mat.albedo),
+        }
+    }
+}
+
 impl Scene {
-    fn ray_trace(&self, ray: &Ray, recursion_level: u8, rng: &mut SmallRng) -> Vec3 {
-        let mut closest_hit: Option<Hit> = None;
+    fn first_intersection_with_ray(&self, ray: &Ray) -> Option<Hit> {
+        let mut first: Option<Hit> = None;
+
         for sphere in self.spheres.iter() {
             let t = match sphere.t_of_intersection_point_with_ray(ray) {
                 Some(val) => val,
                 None => continue,
             };
-            if closest_hit.as_ref().map(|h| t >= h.t).unwrap_or(false) {
+            if first.as_ref().map(|h| t >= h.t).unwrap_or(false) {
                 continue;
             }
-            closest_hit = Some(Hit {
+            first = Some(Hit {
                 obj_info: HitObjectInfo::Sphere(sphere),
                 t,
             });
         }
+
         for triangle in self.triangles.iter() {
             let t = triangle.t_of_intersection_point_with_ray(ray);
             if t.is_nan() || t < 0. {
                 continue;
             }
-            if closest_hit.as_ref().map(|h| t >= h.t).unwrap_or(false) {
+            if first.as_ref().map(|h| t >= h.t).unwrap_or(false) {
                 continue;
             }
             if ray.dir.dot(triangle.normal) >= 0. {
@@ -287,57 +327,45 @@ impl Scene {
             if !Triangle::uv_is_inside(uv) {
                 continue;
             }
-            closest_hit = Some(Hit {
+            first = Some(Hit {
                 obj_info: HitObjectInfo::Triangle { triangle, uv, xyz },
                 t,
             });
         }
-        let closest_hit = match closest_hit {
-            Some(val) => val,
-            None => return Vec3::ZERO,
-        };
-        let (intersection, normal, albedo) = match closest_hit.obj_info {
-            HitObjectInfo::Sphere(sphere) => {
-                let intersection = ray.point_from_t(closest_hit.t);
-                let normal = (intersection - sphere.center).normalize();
-                (intersection, normal, sphere.mat.albedo)
-            }
-            HitObjectInfo::Triangle {
-                triangle,
-                xyz,
-                uv: _uv,
-            } => (xyz, triangle.normal, triangle.mat.albedo),
-        };
 
-        // Compute direct lighting.
-        let mut direct_lighting = Vec3::ZERO;
+        first
+    }
+
+    fn compute_direct_lighting(&self, point: DVec3, normal: DVec3) -> Vec3 {
+        let mut total = Vec3::ZERO;
+
         'light_iter: for light in self.lights.iter() {
-            let intersection_to_light = light.pos - intersection;
+            let point_to_light = light.pos - point;
 
             // Check if something is hiding the light.
-            let light_ray = Ray {
-                dir: intersection_to_light.normalize(),
-                origin: intersection,
+            let ray = Ray {
+                dir: point_to_light.normalize(),
+                origin: point,
             };
-            let light_t = intersection_to_light.length();
+            let light_t = point_to_light.length();
             for sphere in self.spheres.iter() {
-                if let Some(t) = sphere.t_of_intersection_point_with_ray(&light_ray) {
+                if let Some(t) = sphere.t_of_intersection_point_with_ray(&ray) {
                     if t <= light_t {
                         continue 'light_iter;
                     }
                 }
             }
             for triangle in self.triangles.iter() {
-                let t = triangle.t_of_intersection_point_with_ray(&light_ray);
+                let t = triangle.t_of_intersection_point_with_ray(&ray);
                 if t.is_nan() || t > light_t {
                     continue;
                 }
-                if light_ray.dir.dot(triangle.normal) >= 0. {
+                if ray.dir.dot(triangle.normal) >= 0. {
                     // The triangle can only be seen when its normal is pointing
                     // toward us.
                     continue;
                 }
-                let xyz = light_ray.point_from_t(t);
+                let xyz = ray.point_from_t(t);
                 let uv = triangle.uv_of_point(xyz);
                 if !Triangle::uv_is_inside(uv) {
                     continue;
@@ -345,28 +373,52 @@ impl Scene {
                 continue 'light_iter;
             }
 
-            let cos_theta = normal.dot(light_ray.dir) as f32;
+            let cos_theta = normal.dot(ray.dir) as f32;
             let d = light_t as f32;
             let point_light_factor = cos_theta.max(0.) / (4. * f32::consts::PI * d * d);
-            direct_lighting += point_light_factor * light.power;
+            total += point_light_factor * light.power;
         }
 
-        // Compute indirect lighting.
-        let indirect_lighting = if recursion_level >= 2 {
-            Vec3::ZERO
-        } else {
-            let new_dir = UnitSphere.sample(rng);
-            let mut new_dir = DVec3::new(new_dir[0], new_dir[1], new_dir[2]);
-            // Make sure that the ray is not going toward us.
-            if new_dir.dot(normal) < 0. {
-                new_dir = -new_dir;
-            }
-            let new_ray = Ray {
-                dir: new_dir,
-                origin: intersection,
-            };
-            self.ray_trace(&new_ray, recursion_level + 1, rng)
+        total
+    }
+
+    fn ray_trace_indirect(&self, ray: &Ray, rng: &mut SmallRng, recursion_level: u8) -> Vec3 {
+        if recursion_level > 2 {
+            return Vec3::ZERO;
+        }
+
+        let closest_hit = match self.first_intersection_with_ray(ray) {
+            Some(val) => val,
+            None => return Vec3::ZERO,
         };
+        let (intersection, normal, albedo) = closest_hit.intersection_normal_albedo(ray);
+        let direct_lighting = self.compute_direct_lighting(intersection, normal);
+        let indirect_lighting = self.ray_trace_indirect(
+            &Ray::from_origin_and_random_direction_in_hemisphere(intersection, normal, rng),
+            rng,
+            recursion_level + 1,
+        );
+
+        albedo * (direct_lighting + indirect_lighting)
+    }
+
+    fn ray_trace(&self, ray: &Ray, rng: &mut SmallRng) -> Vec3 {
+        let closest_hit = match self.first_intersection_with_ray(ray) {
+            Some(val) => val,
+            None => return Vec3::ZERO,
+        };
+        let (intersection, normal, albedo) = closest_hit.intersection_normal_albedo(ray);
+        let direct_lighting = self.compute_direct_lighting(intersection, normal);
+
+        let mut indirect_lighting = Vec3::ZERO;
+        for _ in 0..SAMPLES {
+            indirect_lighting += self.ray_trace_indirect(
+                &Ray::from_origin_and_random_direction_in_hemisphere(intersection, normal, rng),
+                rng,
+                1,
+            );
+        }
+        indirect_lighting /= SAMPLES as f32;
 
         albedo * (direct_lighting + indirect_lighting)
     }
@@ -499,12 +551,8 @@ fn main() {
                     let x_unit = ((x as f64) - (WIDTH as f64) / 2.) / (HEIGHT as f64) * 2.;
                     let ray = s.camera.ray_for_pixel(x_unit, y_unit);
 
-                    let mut sum = Vec3::ZERO;
-                    for _ in 0..SAMPLES {
-                        sum += s.ray_trace(&ray, 0, &mut rng);
-                    }
-
-                    let c = gamma_encode(sum / (SAMPLES as f32));
+                    let c = s.ray_trace(&ray, &mut rng);
+                    let c = gamma_encode(c);
                     let c = ((f32_to_u8(c.x) as u32) << 16)
                         | ((f32_to_u8(c.y) as u32) << 8)
                         | (f32_to_u8(c.z) as u32);
