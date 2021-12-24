@@ -141,7 +141,6 @@ impl Triangle {
 
 struct Sphere {
     center: DVec3,
-    radius: f64,
     radius_sqr: f64,
     mat: Material,
 }
@@ -150,7 +149,6 @@ impl Sphere {
     fn new(center: DVec3, radius: f64, mat: Material) -> Self {
         Self {
             center,
-            radius,
             radius_sqr: radius * radius,
             mat,
         }
@@ -216,9 +214,6 @@ struct Light {
 
 struct Camera {
     center: DVec3,
-    dir: DVec3,
-    z_near: f64,
-    vertical_fov: f64,
     // Precomputed values.
     grid_center: DVec3,
     grid_right: DVec3,
@@ -233,9 +228,6 @@ impl Camera {
         let grid_up = grid_scale * grid_right.cross(dir).normalize();
         Self {
             center,
-            dir,
-            z_near,
-            vertical_fov,
             grid_center,
             grid_right,
             grid_up,
