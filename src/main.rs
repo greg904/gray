@@ -383,6 +383,19 @@ impl Scene {
         total
     }
 
+    fn compute_indirect_lighting(
+        &self,
+        point: DVec3,
+        normal: DVec3,
+        rng: &mut SmallRng,
+        recursion_level: u8,
+    ) -> Vec3 {
+        let next_ray = Ray::from_origin_and_random_direction_in_hemisphere(point, normal, rng);
+        // Compute the cosine of the angle between the ray and the surface normal.
+        let cos_theta = next_ray.dir.dot(normal) as f32;
+        self.ray_trace_indirect(&next_ray, rng, recursion_level + 1) * cos_theta
+    }
+
     fn ray_trace_indirect(&self, ray: &Ray, rng: &mut SmallRng, recursion_level: u8) -> Vec3 {
         if recursion_level > 2 {
             return Vec3::ZERO;
@@ -394,11 +407,8 @@ impl Scene {
         };
         let (intersection, normal, albedo) = closest_hit.intersection_normal_albedo(ray);
         let direct_lighting = self.compute_direct_lighting(intersection, normal);
-        let indirect_lighting = self.ray_trace_indirect(
-            &Ray::from_origin_and_random_direction_in_hemisphere(intersection, normal, rng),
-            rng,
-            recursion_level + 1,
-        );
+        let indirect_lighting =
+            self.compute_indirect_lighting(intersection, normal, rng, recursion_level);
 
         albedo * (direct_lighting + indirect_lighting)
     }
@@ -413,11 +423,7 @@ impl Scene {
 
         let mut indirect_lighting = Vec3::ZERO;
         for _ in 0..SAMPLES {
-            indirect_lighting += self.ray_trace_indirect(
-                &Ray::from_origin_and_random_direction_in_hemisphere(intersection, normal, rng),
-                rng,
-                1,
-            );
+            indirect_lighting += self.compute_indirect_lighting(intersection, normal, rng, 1);
         }
         indirect_lighting /= SAMPLES as f32;
 
