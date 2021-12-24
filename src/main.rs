@@ -263,6 +263,7 @@ enum HitObjectInfo<'a> {
         uv: DVec2,
         xyz: DVec3,
     },
+    Nothing,
 }
 
 struct Hit<'a> {
@@ -283,26 +284,30 @@ impl<'a> Hit<'a> {
                 xyz,
                 uv: _uv,
             } => (xyz, triangle.normal, triangle.mat.albedo),
+            HitObjectInfo::Nothing => unreachable!(),
         }
     }
 }
 
 impl Scene {
-    fn first_intersection_with_ray(&self, ray: &Ray) -> Option<Hit> {
-        let mut first: Option<Hit> = None;
+    fn first_intersection_with_ray(&self, ray: &Ray) -> Hit {
+        let mut first = Hit {
+            t: f64::NAN,
+            obj_info: HitObjectInfo::Nothing,
+        };
 
         for sphere in self.spheres.iter() {
             let t = match sphere.t_of_intersection_point_with_ray(ray) {
                 Some(val) => val,
                 None => continue,
             };
-            if first.as_ref().map(|h| t >= h.t).unwrap_or(false) {
+            if t >= first.t {
                 continue;
             }
-            first = Some(Hit {
-                obj_info: HitObjectInfo::Sphere(sphere),
+            first = Hit {
                 t,
-            });
+                obj_info: HitObjectInfo::Sphere(sphere),
+            };
         }
 
         for triangle in self.triangles.iter() {
@@ -310,7 +315,7 @@ impl Scene {
             if t.is_nan() || t < 0. {
                 continue;
             }
-            if first.as_ref().map(|h| t >= h.t).unwrap_or(false) {
+            if t >= first.t {
                 continue;
             }
             if ray.dir.dot(triangle.normal) >= 0. {
@@ -323,10 +328,10 @@ impl Scene {
             if !Triangle::uv_is_inside(uv) {
                 continue;
             }
-            first = Some(Hit {
-                obj_info: HitObjectInfo::Triangle { triangle, uv, xyz },
+            first = Hit {
                 t,
-            });
+                obj_info: HitObjectInfo::Triangle { triangle, uv, xyz },
+            };
         }
 
         first
@@ -383,9 +388,9 @@ impl Scene {
             return Vec3::ZERO;
         }
 
-        let closest_hit = match self.first_intersection_with_ray(ray) {
-            Some(val) => val,
-            None => return Vec3::ZERO,
+        let closest_hit = self.first_intersection_with_ray(ray);
+        if closest_hit.t.is_nan() {
+            return Vec3::ZERO;
         };
         let (intersection, normal, albedo) = closest_hit.intersection_normal_albedo(ray);
         let direct_lighting = self.compute_direct_lighting(intersection, normal);
@@ -399,9 +404,9 @@ impl Scene {
     }
 
     fn ray_trace(&self, ray: &Ray, rng: &mut SmallRng) -> Vec3 {
-        let closest_hit = match self.first_intersection_with_ray(ray) {
-            Some(val) => val,
-            None => return Vec3::ZERO,
+        let closest_hit = self.first_intersection_with_ray(ray);
+        if closest_hit.t.is_nan() {
+            return Vec3::ZERO;
         };
         let (intersection, normal, albedo) = closest_hit.intersection_normal_albedo(ray);
         let direct_lighting = self.compute_direct_lighting(intersection, normal);
