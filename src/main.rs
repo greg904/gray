@@ -1,10 +1,13 @@
+mod view_tiles;
+
+use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::f32;
 use std::sync::Arc;
 use std::sync::Condvar;
 use std::sync::Mutex;
 use std::sync::RwLock;
 use std::thread;
-use std::time::Duration;
 use std::time::Instant;
 
 use glam::DMat2;
@@ -25,6 +28,7 @@ const WIDTH: usize = 1080;
 const HEIGHT: usize = 720;
 const SAMPLES: usize = 4;
 const WORKER_COUNT: usize = 8;
+const TILE_SIZE: u16 = 64;
 
 struct Ray {
     origin: DVec3,
@@ -462,8 +466,14 @@ fn aces_fit(color: Vec3) -> Vec3 {
     color
 }
 
+/// A hack to share a pointer between multiple threads. This is used in unsafe
+/// code.
+#[derive(Clone, Copy)]
+struct SendMutPtr<T>(*mut T);
+
+unsafe impl<T> Send for SendMutPtr<T> {}
+
 fn main() {
-    let mut buf: Vec<u32> = vec![0; WIDTH * HEIGHT];
     let mut window = Window::new("gray", WIDTH, HEIGHT, WindowOptions::default())
         .expect("failed to create window");
 
@@ -509,62 +519,80 @@ fn main() {
         ),
     }));
 
-    let mut theta = 0f32;
+    let tiles = Arc::new(view_tiles::Tiles::new(
+        WIDTH.try_into().unwrap(),
+        HEIGHT.try_into().unwrap(),
+        TILE_SIZE,
+    ));
 
-    let total_pixels = WIDTH * HEIGHT;
-    let pixels_per_worker = total_pixels / WORKER_COUNT;
-    let mut worker_bufs = Vec::new();
+    // These are the tiles not rendered yet.
+    let tile_queue: Arc<Mutex<Vec<u16>>> =
+        Arc::new(Mutex::new(Vec::with_capacity(tiles.tile_count().into())));
+    let tile_enqueued = Arc::new(Condvar::new());
+    let tile_dequeued = Arc::new(Condvar::new());
+
+    let mut pixels: Vec<u32> = vec![0; WIDTH * HEIGHT];
+    let pixels_ptr = SendMutPtr(pixels.as_mut_ptr());
+
     let mut worker_handles = Vec::new();
-    let mut all_running = Vec::new();
-    for i in 0..WORKER_COUNT {
-        let pixels = if i == WORKER_COUNT {
-            // The last worker gets the remaining workers as the division was rounded down.
-            total_pixels - (WORKER_COUNT - 1) * pixels_per_worker
-        } else {
-            pixels_per_worker
-        };
-        let buf = Arc::new(RwLock::new(vec![0u32; pixels]));
-
+    let mut workers_running = Vec::new();
+    for _ in 0..WORKER_COUNT {
         let running = Arc::new((Mutex::new(false), Condvar::new()));
-        all_running.push(running.clone());
+        workers_running.push(running.clone());
 
+        let tiles_ref = tiles.clone();
+        let tile_queue_ref = tile_queue.clone();
+        let tile_enqueued_ref = tile_enqueued.clone();
+        let tile_dequeued_ref = tile_dequeued.clone();
         let scene_ref = scene.clone();
-        let buf_ref = buf.clone();
+
         worker_handles.push(thread::spawn(move || {
             let mut rng = SmallRng::from_entropy();
 
             loop {
-                // Wait for signal to run.
-                let _ = running
-                    .1
-                    .wait_while(running.0.lock().unwrap(), |r| !*r)
-                    .unwrap();
+                // Wait for a tile and remove it from the queue.
+                let tile_index = {
+                    let mut q = tile_queue_ref.lock().unwrap();
+                    let i = loop {
+                        q = match q.pop() {
+                            Some(val) => break val,
+                            None => tile_enqueued_ref.wait(q).unwrap(),
+                        };
+                    };
+                    *running.0.lock().unwrap() = true;
+                    i
+                };
+                let tile = tiles_ref.get(tile_index);
+
+                tile_dequeued_ref.notify_one();
 
                 let s = scene_ref.read().unwrap();
-                let mut b = buf_ref.write().unwrap();
-                for j in 0..pixels {
-                    let pixel = i * pixels_per_worker + j;
-                    let x = pixel % WIDTH;
-                    let y = pixel / HEIGHT;
 
-                    let y_unit = ((y as f64) - (HEIGHT as f64) / 2.) / (HEIGHT as f64) * -2.;
-                    let x_unit = ((x as f64) - (WIDTH as f64) / 2.) / (HEIGHT as f64) * 2.;
-                    let ray = s.camera.ray_for_pixel(x_unit, y_unit);
+                for y in tile.y_min..tile.y_max {
+                    for x in tile.x_min..tile.x_max {
+                        let x_unit = ((x as f64) - (WIDTH as f64) / 2.) / (HEIGHT as f64) * 2.;
+                        let y_unit = ((y as f64) - (HEIGHT as f64) / 2.) / (HEIGHT as f64) * -2.;
+                        let ray = s.camera.ray_for_pixel(x_unit, y_unit);
 
-                    let c = s.ray_trace(&ray, &mut rng);
-                    let c = gamma_encode(c);
-                    let c = ((f32_to_u8(c.x) as u32) << 16)
-                        | ((f32_to_u8(c.y) as u32) << 8)
-                        | (f32_to_u8(c.z) as u32);
-                    b[j] = c;
+                        let c = s.ray_trace(&ray, &mut rng);
+                        let c = gamma_encode(c);
+                        let c = ((f32_to_u8(c.x) as u32) << 16)
+                            | ((f32_to_u8(c.y) as u32) << 8)
+                            | (f32_to_u8(c.z) as u32);
+
+                        let i = isize::try_from(y).unwrap() * isize::try_from(WIDTH).unwrap()
+                            + isize::try_from(x).unwrap();
+                        unsafe { *pixels_ptr.0.offset(i) = c };
+                    }
                 }
 
                 *running.0.lock().unwrap() = false;
                 running.1.notify_one();
             }
         }));
-        worker_bufs.push(buf);
     }
+
+    let mut theta = 0f32;
 
     let mut timer = Instant::now();
     let mut render_cnt = 0;
@@ -589,25 +617,25 @@ fn main() {
             s.spheres[0].center.y = theta.sin() as f64;
         }
 
-        for pair in all_running.iter() {
-            // Tell workers to run.
-            *pair.0.lock().unwrap() = true;
-            pair.1.notify_one();
+        {
+            let mut t = tile_queue.lock().unwrap();
+            for i in 0..tiles.tile_count() {
+                t.push(i);
+            }
+            tile_enqueued.notify_all();
         }
 
-        // Wait for all the workers to finish and copy the result to the window buffer.
-        let mut cursor = 0;
+        // Wait until no tile is left and all the workers are done.
+        let _ = tile_dequeued
+            .wait_while(tile_queue.lock().unwrap(), |q| !q.is_empty())
+            .unwrap();
         for i in 0..WORKER_COUNT {
-            let pair = &all_running[i];
+            let pair = &workers_running[i];
             let _ = pair.1.wait_while(pair.0.lock().unwrap(), |r| *r).unwrap();
-
-            let b = worker_bufs[i].read().unwrap();
-            buf[cursor..(cursor + b.len())].copy_from_slice(&b);
-            cursor += b.len();
         }
 
         window
-            .update_with_buffer(&buf, WIDTH, HEIGHT)
+            .update_with_buffer(&pixels, WIDTH, HEIGHT)
             .expect("failed to update the window's content");
     }
 }
