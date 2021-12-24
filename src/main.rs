@@ -26,9 +26,10 @@ use rand_distr::UnitSphere;
 
 const WIDTH: usize = 1080;
 const HEIGHT: usize = 720;
-const SAMPLES: usize = 4;
+const SAMPLES: usize = 200;
 const WORKER_COUNT: usize = 8;
 const TILE_SIZE: u16 = 64;
+const BACKGROUND: (f32, f32, f32) = (0.471, 0.796, 0.957);
 
 struct Ray {
     origin: DVec3,
@@ -398,12 +399,12 @@ impl Scene {
 
     fn ray_trace_indirect(&self, ray: &Ray, rng: &mut SmallRng, recursion_level: u8) -> Vec3 {
         if recursion_level > 2 {
-            return Vec3::ZERO;
+            return Vec3::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2);
         }
 
         let closest_hit = self.first_intersection_with_ray(ray);
         if closest_hit.t.is_nan() {
-            return Vec3::ZERO;
+            return Vec3::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2);
         };
         let (intersection, normal, albedo) = closest_hit.intersection_normal_albedo(ray);
         let direct_lighting = self.compute_direct_lighting(intersection, normal);
@@ -416,7 +417,7 @@ impl Scene {
     fn ray_trace(&self, ray: &Ray, rng: &mut SmallRng) -> Vec3 {
         let closest_hit = self.first_intersection_with_ray(ray);
         if closest_hit.t.is_nan() {
-            return Vec3::ZERO;
+            return Vec3::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2);
         };
         let (intersection, normal, albedo) = closest_hit.intersection_normal_albedo(ray);
         let direct_lighting = self.compute_direct_lighting(intersection, normal);
@@ -483,7 +484,7 @@ fn main() {
     let scene = Arc::new(RwLock::new(Scene {
         spheres: vec![Sphere::new(
             DVec3::ZERO,
-            0.5,
+            0.7,
             Material {
                 albedo: Vec3::new(1., 0., 0.),
             },
@@ -512,11 +513,11 @@ fn main() {
         ],
         lights: vec![Light {
             pos: DVec3::new(10., 17., 50.),
-            power: Vec3::new(40000., 40000., 40000.),
+            power: Vec3::new(1000., 1000., 1000.),
         }],
         camera: Camera::new(
-            DVec3::new(-1., 0., 2.),
-            DVec3::new(1., 0., -1.).normalize(),
+            DVec3::new(-1.2, 0., 0.3),
+            DVec3::new(1., 0., -0.2).normalize(),
             0.1,
             80f64.to_radians(),
         ),
@@ -595,7 +596,7 @@ fn main() {
         }));
     }
 
-    let mut theta = 0f32;
+    let mut theta = 0f64;
 
     let mut timer = Instant::now();
     let mut render_cnt = 0;
@@ -612,12 +613,11 @@ fn main() {
         }
         render_cnt += 1;
 
-        theta += 0.05f32;
+        theta += 0.05;
 
         {
             let mut s = scene.write().unwrap();
-            s.spheres[0].center.x = theta.cos() as f64;
-            s.spheres[0].center.y = theta.sin() as f64;
+            s.spheres[0].center.y = 0.3 * theta.cos();
         }
 
         {
