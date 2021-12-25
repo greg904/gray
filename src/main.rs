@@ -132,6 +132,7 @@ struct Scene {
     lights: Vec<Light>,
     camera: Camera,
     samples: usize,
+    bounces: u8,
     aim_rays: bool,
 }
 
@@ -273,7 +274,7 @@ impl Scene {
         rng: &mut SmallRng,
         recursion_level: u8,
     ) -> Vec3 {
-        if recursion_level >= 2 {
+        if recursion_level >= self.bounces {
             return Vec3::ZERO;
         }
 
@@ -331,9 +332,10 @@ impl Scene {
 
             for (i, triangle) in self.triangles.iter().enumerate() {
                 // The triangle is visible from our side.
-                if triangle.tri.normal().dot(triangle.tri.a() - intersection) >= -0.00001 &&
-                    triangle.tri.normal().dot(triangle.tri.b() - intersection) >= -0.00001 &&
-                    triangle.tri.normal().dot(triangle.tri.c() - intersection) >= -0.00001 {
+                if triangle.tri.normal().dot(triangle.tri.a() - intersection) >= -0.00001
+                    && triangle.tri.normal().dot(triangle.tri.b() - intersection) >= -0.00001
+                    && triangle.tri.normal().dot(triangle.tri.c() - intersection) >= -0.00001
+                {
                     continue;
                 }
                 let a_ = (triangle.tri.a() - intersection).normalize();
@@ -489,6 +491,10 @@ struct Args {
     /// The amount of samples per pixel.
     #[clap(short, long, default_value = "5")]
     samples: usize,
+
+    /// The amount of light bounces per sample.
+    #[clap(short, long, default_value = "3")]
+    bounces: u8,
 }
 
 fn main() {
@@ -538,6 +544,7 @@ fn main() {
             80f32.to_radians(),
         ),
         samples: args.samples,
+        bounces: args.bounces,
         aim_rays: args.aim_rays,
     }));
 
