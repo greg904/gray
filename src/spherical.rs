@@ -27,6 +27,7 @@ pub fn area_of_intersection_of_spherical_triangle_and_unit_hemisphere(
     hemisphere_r: f32,
     hemisphere_dir: Vec3,
 ) -> f32 {
+    // TODO: Is there a better way to do this?
     let mut a_dot_hd = a_.dot(hemisphere_dir);
     let mut b_dot_hd = b_.dot(hemisphere_dir);
     let mut c_dot_hd = c_.dot(hemisphere_dir);
@@ -87,19 +88,20 @@ pub fn random_look_in_sphere(
 ) -> Vec3 {
     // Make sure that we are outside the sphere as expected.
     assert!(from.distance_squared(sphere_center) > sphere_r * sphere_r);
-    // We sample a coordinate in a unit disc and project it onto the
-    // sphere with the Pythagorean theorem.
-    // TODO: Does this actually preserve the same distribution as if we were picking a ray at
-    //       random and checking if it was intersecting with the sphere?
-    let unit_xy: [f32; 2] = UnitDisc.sample(rng);
-    let unit_z = (1. - unit_xy[0] * unit_xy[0] - unit_xy[1] * unit_xy[1]).sqrt();
-
-    let z = (from - sphere_center).normalize();
-    let (minus_y, x) = polar_and_azimuthal_vectors_from_radial_vector(z);
-    let y = -minus_y;
-
-    let sphere_point = sphere_center + sphere_r * (unit_xy[0] * x + unit_xy[1] * y + unit_z * z);
-    sphere_point
+    // We consider the cone tangent to the sphere, and use the idea from
+    // https://math.stackexchange.com/a/205589.
+    let to_sphere_center = sphere_center - from;
+    let d = to_sphere_center.length();
+    let tmp = sphere_r / d;
+    let z_min = (1. - tmp * tmp).sqrt();
+    let z = rng.gen_range(z_min..1.);
+    let phi = rng.gen_range(0.0..(2. * f32::consts::PI));
+    let tmp = (1. - z * z).sqrt();
+    let x = tmp * phi.cos();
+    let y = tmp * phi.sin();
+    let cone_dir = to_sphere_center / d;
+    let (x_dir, y_dir) = cone_dir.any_orthonormal_pair();
+    from + d * (x * x_dir + y * y_dir + z * cone_dir)
 }
 
 pub fn random_direction_toward_triangle(a: Vec3, b: Vec3, c: Vec3, rng: &mut SmallRng) -> Vec3 {
@@ -152,7 +154,7 @@ mod tests {
                 dir: (target - from).normalize(),
             };
 
-            assert!(sphere.t_of_intersection_point_with_ray(&ray).is_some(),);
+            assert!(!sphere.t_of_intersection_point_with_ray(&ray).is_nan());
         }
     }
 

@@ -328,9 +328,10 @@ impl Scene {
                 let a_ = (triangle.tri.a() - intersection).normalize();
                 let b_ = (triangle.tri.b() - intersection).normalize();
                 let c_ = (triangle.tri.c() - intersection).normalize();
-                let area = spherical::area_of_intersection_of_spherical_triangle_and_unit_hemisphere(
-                    a_, b_, c_, 1., normal,
-                );
+                let area =
+                    spherical::area_of_intersection_of_spherical_triangle_and_unit_hemisphere(
+                        a_, b_, c_, 1., normal,
+                    );
                 if area <= 0.00001 {
                     continue;
                 }
