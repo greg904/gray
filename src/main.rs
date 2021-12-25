@@ -303,7 +303,7 @@ impl Scene {
 
             for (i, sphere) in self.spheres.iter().enumerate() {
                 // The sphere is visible from our side.
-                if normal.dot(*sphere.sph.center() - intersection) <= 0. {
+                if normal.dot(*sphere.sph.center() - intersection) <= 0.00001 {
                     continue;
                 }
                 let d = sphere.sph.center().distance(intersection) as f32;
@@ -330,7 +330,7 @@ impl Scene {
                 let c_ = (triangle.tri.c() - intersection).normalize();
                 let area = spherical::area_of_intersection_of_spherical_triangle_and_unit_hemisphere(
                     a_, b_, c_, 1., normal,
-                ) as f32;
+                );
                 if area <= 0.00001 {
                     continue;
                 }
@@ -461,6 +461,7 @@ unsafe impl<T> Send for SendMutPtr<T> {}
 
 #[derive(ArgEnum, Copy, Clone)]
 enum ToneMap {
+    Linear,
     GammaEncode,
     AcesLike,
 }
@@ -592,6 +593,7 @@ fn main() {
 
                         let c = s.ray_trace(&ray, &mut rng);
                         let c = match tone_map {
+                            ToneMap::Linear => c,
                             ToneMap::GammaEncode => gamma_encode(c),
                             ToneMap::AcesLike => aces_fit(c),
                         };
