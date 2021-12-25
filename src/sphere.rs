@@ -15,7 +15,7 @@ impl Sphere {
         }
     }
 
-    pub fn t_of_intersection_point_with_ray(&self, ray: &crate::Ray) -> Option<f32> {
+    pub fn t_of_intersection_point_with_ray(&self, ray: &crate::Ray) -> f32 {
         // Let $O(x_O,y_O,z_O)$ be the center of the sphere, $R(x_R,y_R,z_R)$ the starting point of the ray and $\vec{u}(x_u,y_u,z_u)$ a unit vector for the direction of the ray.
         //
         // A point $M(x,y,z)$ on the ray is described by its parameter $t \in \mathbb{R}_+$ by the following equations : $x = x_R + tx_u,$ $y = y_R + ty_u,$ and $z = z_R + tz_u.$
@@ -39,36 +39,32 @@ impl Sphere {
         // \end{align*}
         //
         // This is a quadratic equation which we can solve.
-        let a = ray.dir.length_squared();
-        let b = 2. * ray.dir.dot(ray.origin - self.center);
-        let b_sqr = b * b;
-        let c = (ray.origin - self.center).length_squared() - self.radius_sqr;
-        let discriminant = b_sqr - 4. * a * c;
-        if discriminant < 0. {
-            return None;
+        let origin_to_center = ray.origin - self.center;
+        let half_b = ray.dir.dot(origin_to_center);
+        let half_b_sqr = half_b * half_b;
+        let c = origin_to_center.length_squared() - self.radius_sqr;
+        let quarter_discriminant = half_b_sqr - c;
+        if quarter_discriminant < 0. {
+            return f32::NAN;
         }
-        let discriminant_sqrt = discriminant.sqrt();
-        // If both `t_0` and `t_1` are negative, the sphere is behind the ray.
+        let quarter_discriminant_sqrt = quarter_discriminant.sqrt();
+        // If both solutions are negative, the sphere is behind the ray.
         // If one is positive and the other is negative, the ray origin is inside the sphere.
         // In that case, we do not want to count the intersection because our spheres are only
         // made up of the exterior surface. This allows shooting a ray from a point on the
         // sphere without caring about intersecting that same sphere again without convoluted
         // tricks.
-        let t_0 = (-b - discriminant_sqrt) / (2. * a);
+        // If both are positive, then we take the smallest which is the one that corresponds
+        // to the first intersection point with the sphere.
+        let t_0 = -half_b - quarter_discriminant_sqrt;
         if t_0 < 0. {
-            return None;
+            return f32::NAN;
         }
-        let t_1 = (-b + discriminant_sqrt) / (2. * a);
-        if t_1 < 0. {
-            return None;
-        }
-        // Take the first point on the ray, that is the point with the smallest parameter.
-        let t = t_0.min(t_1);
-        Some(t)
+        t_0
     }
 
-    pub fn center(&self) -> Vec3 {
-        self.center
+    pub fn center(&self) -> &Vec3 {
+        &self.center
     }
 
     pub fn center_mut(&mut self) -> &mut Vec3 {

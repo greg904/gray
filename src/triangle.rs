@@ -42,20 +42,38 @@ impl Triangle {
     }
 
     /// Returns the `t` parameter of the point of intersection between the ray and the plane that
-    /// contains the triangle, or `NaN` if there is none. Note that although the intersection
-    /// point is in the plane that contains the triangle, it could still be outside the triangle.
+    /// contains the triangle if it exists, or `NaN` if there is no intersection because the ray
+    /// and the plane are parallel.
+    ///
+    /// Note that even if the intersection point is in the plane that contains the triangle, it
+    /// could still be outside the triangle, so to check if there is an intersection you should
+    /// also call `uv_of_point` and `uv_is_inside`.
     pub fn t_of_intersection_point_with_ray(&self, ray: &crate::Ray) -> f32 {
-        -((ray.origin - self.points.0).dot(self.normal)) / ray.dir.dot(self.normal)
+        ((self.points.0 - ray.origin).dot(self.normal)) / ray.dir.dot(self.normal)
+    }
+
+    /// Returns the `t` parameter of the point of intersection between the ray and the plane that
+    /// contains the triangle if ray is seeing the face of the triangle that is visible, or `NaN`
+    /// if the ray is seeing the face of the triangle that is not visible or if there is no intersection
+    /// because the ray and the plane are parallel.
+    ///
+    /// Note that even if the intersection point is in the plane that contains the triangle, it
+    /// could still be outside the triangle, so to check if there is an intersection you should
+    /// also call `uv_of_point` and `uv_is_inside`.
+    pub fn t_of_intersection_point_with_ray_checked(&self, ray: &crate::Ray) -> f32 {
+        let x = ray.dir.dot(self.normal);
+        if x >= 0. {
+            return f32::NAN;
+        }
+        ((self.points.0 - ray.origin).dot(self.normal)) / x
     }
 
     /// Returns the UV coordinates of a point in space, assuming that the point is in the plane
     /// that contains the triangle.
-    pub fn uv_of_point(&self, point_xyz: Vec3) -> Vec2 {
+    pub fn uv_of_point(&self, p: Vec3) -> Vec2 {
         // Get the coordinates of the point in the orthonormal basis.
-        let point_st = Vec2::new(
-            (point_xyz - self.points.0).dot(self.s_xyz),
-            (point_xyz - self.points.0).dot(self.t_xyz),
-        );
+        let point_xyz = p - self.points.0;
+        let point_st = Vec2::new(point_xyz.dot(self.s_xyz), point_xyz.dot(self.t_xyz));
         // Use the change of basis matrix.
         self.uv_to_st * point_st
     }

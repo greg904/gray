@@ -1,8 +1,10 @@
+mod light;
 mod sphere;
 mod spherical;
 mod triangle;
 mod view_tiles;
 
+use light::Light;
 use sphere::Sphere;
 use triangle::Triangle;
 
@@ -83,11 +85,6 @@ struct SphereObject {
     mat: Material,
 }
 
-struct Light {
-    pos: Vec3,
-    power: Vec3,
-}
-
 struct Camera {
     center: Vec3,
     // Precomputed values.
@@ -156,7 +153,7 @@ impl<'a> Hit<'a> {
         match self.obj_info {
             HitObjectInfo::Sphere(sphere) => {
                 let intersection = ray.point_from_t(self.t);
-                let normal = (intersection - sphere.sph.center()).normalize();
+                let normal = (intersection - *sphere.sph.center()).normalize();
                 (intersection, normal, sphere.mat.albedo)
             }
             HitObjectInfo::Triangle {
@@ -177,11 +174,9 @@ impl Scene {
         };
 
         for sphere in self.spheres.iter() {
-            let t = match sphere.sph.t_of_intersection_point_with_ray(ray) {
-                Some(val) => val,
-                None => continue,
-            };
-            if t >= first.t {
+            let t = sphere.sph.t_of_intersection_point_with_ray(ray);
+            // Operations with `NaN` return `false`.
+            if t.is_nan() || t >= first.t {
                 continue;
             }
             first = Hit {
@@ -191,16 +186,13 @@ impl Scene {
         }
 
         for triangle in self.triangles.iter() {
-            let t = triangle.tri.t_of_intersection_point_with_ray(ray);
-            if t.is_nan() || t < 0. {
+            let t = triangle.tri.t_of_intersection_point_with_ray_checked(ray);
+            // The follow comparison evaluates to `true` if `t` is `NaN` (triangle plane and ray
+            // are parallel or ray is not seeing the visible face of the triangle).
+            if !(t >= 0.) {
                 continue;
             }
             if t >= first.t {
-                continue;
-            }
-            if ray.dir.dot(triangle.tri.normal()) >= 0. {
-                // The triangle can only be seen when its normal is pointing
-                // toward us.
                 continue;
             }
             let xyz = ray.point_from_t(t);
@@ -217,54 +209,49 @@ impl Scene {
         first
     }
 
-    fn compute_direct_lighting(&self, point: Vec3, normal: Vec3) -> Vec3 {
-        let mut total = Vec3::ZERO;
+    fn compute_direct_lighting_for_light(&self, point: Vec3, normal: Vec3, light: &Light) -> Vec3 {
+        let point_to_light = *light.pos() - point;
+        let d_cos_theta = normal.dot(point_to_light);
+        if d_cos_theta <= 0. {
+            return Vec3::ZERO;
+        }
+        let d = point_to_light.length();
 
-        'light_iter: for light in self.lights.iter() {
-            let point_to_light = light.pos - point;
-            let ray = Ray {
-                dir: point_to_light.normalize(),
-                origin: point,
-            };
-
-            let cos_theta = normal.dot(ray.dir) as f32;
-            if cos_theta <= 0. {
-                continue 'light_iter;
+        // Check if something is hiding the light.
+        let ray = Ray {
+            dir: point_to_light / d,
+            origin: point,
+        };
+        for sphere in self.spheres.iter() {
+            let t = sphere.sph.t_of_intersection_point_with_ray(&ray);
+            // t could be `NaN`, in which case the following comparison will return `false`.
+            if t <= d {
+                return Vec3::ZERO;
             }
-
-            // Check if something is hiding the light.
-            let light_t = point_to_light.length();
-            for sphere in self.spheres.iter() {
-                if let Some(t) = sphere.sph.t_of_intersection_point_with_ray(&ray) {
-                    if t <= light_t {
-                        continue 'light_iter;
-                    }
-                }
+        }
+        for triangle in self.triangles.iter() {
+            let t = triangle.tri.t_of_intersection_point_with_ray_checked(&ray);
+            // The comparison is done with a negation so that it evaluates to `true` for `NaN`.
+            if !(t <= d) {
+                continue;
             }
-            for triangle in self.triangles.iter() {
-                let t = triangle.tri.t_of_intersection_point_with_ray(&ray);
-                if t.is_nan() || t > light_t {
-                    continue;
-                }
-                if ray.dir.dot(triangle.tri.normal()) >= 0. {
-                    // The triangle can only be seen when its normal is pointing
-                    // toward us.
-                    continue;
-                }
-                let xyz = ray.point_from_t(t);
-                let uv = triangle.tri.uv_of_point(xyz);
-                if !Triangle::uv_is_inside(uv) {
-                    continue;
-                }
-                continue 'light_iter;
+            let xyz = ray.point_from_t(t);
+            let uv = triangle.tri.uv_of_point(xyz);
+            if !Triangle::uv_is_inside(uv) {
+                continue;
             }
-
-            let d = light_t as f32;
-            let point_light_factor = cos_theta.max(0.) / (4. * f32::consts::PI * d * d);
-            total += point_light_factor * light.power;
+            return Vec3::ZERO;
         }
 
-        total
+        let cos_theta = d_cos_theta / d;
+        let point_light_factor_times_4pi = cos_theta / (d * d);
+        point_light_factor_times_4pi * *light.power_over_4pi()
+    }
+
+    fn compute_direct_lighting(&self, point: Vec3, normal: Vec3) -> Vec3 {
+        self.lights.iter().fold(Vec3::ZERO, |acc, l| {
+            acc + self.compute_direct_lighting_for_light(point, normal, l)
+        })
     }
 
     fn compute_indirect_lighting(
@@ -316,7 +303,7 @@ impl Scene {
 
             for (i, sphere) in self.spheres.iter().enumerate() {
                 // The sphere is visible from our side.
-                if normal.dot(sphere.sph.center() - intersection) <= 0. {
+                if normal.dot(*sphere.sph.center() - intersection) <= 0. {
                     continue;
                 }
                 let d = sphere.sph.center().distance(intersection) as f32;
@@ -364,11 +351,11 @@ impl Scene {
                             let sphere = &self.spheres[obj];
                             let target = spherical::random_look_in_sphere(
                                 intersection,
-                                sphere.sph.center(),
+                                *sphere.sph.center(),
                                 sphere.sph.radius(),
                                 rng,
                             );
-                            let normal = (target - sphere.sph.center()).normalize();
+                            let normal = (target - *sphere.sph.center()).normalize();
                             (
                                 target,
                                 (target - intersection).normalize(),
@@ -533,10 +520,10 @@ fn main() {
                 },
             },
         ],
-        lights: vec![Light {
-            pos: Vec3::new(10., 17., 50.),
-            power: Vec3::new(1000., 1000., 1000.),
-        }],
+        lights: vec![Light::new(
+            Vec3::new(10., 17., 50.),
+            Vec3::new(8000., 8000., 8000.),
+        )],
         camera: Camera::new(
             Vec3::new(-1.2, 0., 0.3),
             Vec3::new(1., 0., -0.2).normalize(),
