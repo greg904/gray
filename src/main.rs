@@ -331,7 +331,9 @@ impl Scene {
 
             for (i, triangle) in self.triangles.iter().enumerate() {
                 // The triangle is visible from our side.
-                if triangle.tri.normal().dot(triangle.tri.a() - intersection) >= 0. {
+                if triangle.tri.normal().dot(triangle.tri.a() - intersection) >= -0.00001 &&
+                    triangle.tri.normal().dot(triangle.tri.b() - intersection) >= -0.00001 &&
+                    triangle.tri.normal().dot(triangle.tri.c() - intersection) >= -0.00001 {
                     continue;
                 }
                 let a_ = (triangle.tri.a() - intersection).normalize();
