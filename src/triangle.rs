@@ -81,10 +81,10 @@ impl Triangle {
     }
 
     pub fn b(&self) -> Vec3 {
-        self.points.0
+        self.points.1
     }
 
     pub fn c(&self) -> Vec3 {
-        self.points.0
+        self.points.2
     }
 }
