@@ -1,13 +1,13 @@
-use glam::DVec3;
+use glam::Vec3;
 
 pub struct Sphere {
-    center: DVec3,
-    radius: f64,
-    radius_sqr: f64,
+    center: Vec3,
+    radius: f32,
+    radius_sqr: f32,
 }
 
 impl Sphere {
-    pub fn new(center: DVec3, radius: f64) -> Self {
+    pub fn new(center: Vec3, radius: f32) -> Self {
         Self {
             center,
             radius,
@@ -15,7 +15,7 @@ impl Sphere {
         }
     }
 
-    pub fn t_of_intersection_point_with_ray(&self, ray: &crate::Ray) -> Option<f64> {
+    pub fn t_of_intersection_point_with_ray(&self, ray: &crate::Ray) -> Option<f32> {
         // Let $O(x_O,y_O,z_O)$ be the center of the sphere, $R(x_R,y_R,z_R)$ the starting point of the ray and $\vec{u}(x_u,y_u,z_u)$ a unit vector for the direction of the ray.
         //
         // A point $M(x,y,z)$ on the ray is described by its parameter $t \in \mathbb{R}_+$ by the following equations : $x = x_R + tx_u,$ $y = y_R + ty_u,$ and $z = z_R + tz_u.$
@@ -67,15 +67,15 @@ impl Sphere {
         Some(t)
     }
 
-    pub fn center(&self) -> DVec3 {
+    pub fn center(&self) -> Vec3 {
         self.center
     }
 
-    pub fn center_mut(&mut self) -> &mut DVec3 {
+    pub fn center_mut(&mut self) -> &mut Vec3 {
         &mut self.center
     }
 
-    pub fn radius(&self) -> f64 {
+    pub fn radius(&self) -> f32 {
         self.radius
     }
 }

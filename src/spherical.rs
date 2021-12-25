@@ -1,15 +1,15 @@
 use core::f32;
 use core::mem;
 
-use glam::DVec3;
+use glam::Vec3;
 
 use rand::distributions::Distribution;
 use rand::rngs::SmallRng;
 use rand::Rng;
 use rand_distr::UnitDisc;
 
-pub fn polar_and_azimuthal_vectors_from_radial_vector(radial_vector: DVec3) -> (DVec3, DVec3) {
-    let azimuthal_vector = DVec3::Z.cross(radial_vector).normalize();
+pub fn polar_and_azimuthal_vectors_from_radial_vector(radial_vector: Vec3) -> (Vec3, Vec3) {
+    let azimuthal_vector = Vec3::Z.cross(radial_vector).normalize();
     let polar_vector = azimuthal_vector.cross(radial_vector);
     (polar_vector, azimuthal_vector)
 }
@@ -21,12 +21,12 @@ pub fn area_of_sphere_projected_to_unit_sphere(sphere_d: f32, sphere_r: f32) -> 
 }
 
 pub fn area_of_intersection_of_spherical_triangle_and_unit_hemisphere(
-    mut a_: DVec3,
-    mut b_: DVec3,
-    mut c_: DVec3,
-    hemisphere_r: f64,
-    hemisphere_dir: DVec3,
-) -> f64 {
+    mut a_: Vec3,
+    mut b_: Vec3,
+    mut c_: Vec3,
+    hemisphere_r: f32,
+    hemisphere_dir: Vec3,
+) -> f32 {
     let mut a_dot_hd = a_.dot(hemisphere_dir);
     let mut b_dot_hd = b_.dot(hemisphere_dir);
     let mut c_dot_hd = c_.dot(hemisphere_dir);
@@ -80,18 +80,18 @@ pub fn area_of_intersection_of_spherical_triangle_and_unit_hemisphere(
 }
 
 pub fn random_look_in_sphere(
-    from: DVec3,
-    sphere_center: DVec3,
-    sphere_r: f64,
+    from: Vec3,
+    sphere_center: Vec3,
+    sphere_r: f32,
     rng: &mut SmallRng,
-) -> DVec3 {
+) -> Vec3 {
     // Make sure that we are outside the sphere as expected.
     assert!(from.distance_squared(sphere_center) > sphere_r * sphere_r);
     // We sample a coordinate in a unit disc and project it onto the
     // sphere with the Pythagorean theorem.
     // TODO: Does this actually preserve the same distribution as if we were picking a ray at
     //       random and checking if it was intersecting with the sphere?
-    let unit_xy: [f64; 2] = UnitDisc.sample(rng);
+    let unit_xy: [f32; 2] = UnitDisc.sample(rng);
     let unit_z = (1. - unit_xy[0] * unit_xy[0] - unit_xy[1] * unit_xy[1]).sqrt();
 
     let z = (from - sphere_center).normalize();
@@ -102,7 +102,7 @@ pub fn random_look_in_sphere(
     sphere_point
 }
 
-pub fn random_direction_toward_triangle(a: DVec3, b: DVec3, c: DVec3, rng: &mut SmallRng) -> DVec3 {
+pub fn random_direction_toward_triangle(a: Vec3, b: Vec3, c: Vec3, rng: &mut SmallRng) -> Vec3 {
     // We project the triangle's points to points on a unit sphere, and then pick a point
     // inside of the spherical triangle described by those points. As an approximation, we
     // can pick a point in the non-spherical triangle and normalize the vector instead.
@@ -110,8 +110,8 @@ pub fn random_direction_toward_triangle(a: DVec3, b: DVec3, c: DVec3, rng: &mut 
     let b_ = b.normalize();
     let c_ = c.normalize();
     // From https://blogs.sas.com/content/iml/2020/10/19/random-points-in-triangle.html.
-    let mut p: f64 = rng.gen();
-    let mut q: f64 = rng.gen();
+    let mut p: f32 = rng.gen();
+    let mut q: f32 = rng.gen();
     if p + q > 1. {
         p = 1. - p;
         q = 1. - q;
@@ -125,7 +125,7 @@ mod tests {
     use crate::triangle::Triangle;
     use crate::Ray;
 
-    use glam::DVec3;
+    use glam::Vec3;
 
     use rand::rngs::SmallRng;
     use rand::Rng;
@@ -135,12 +135,12 @@ mod tests {
     fn random_look_in_sphere() {
         let mut rng = SmallRng::seed_from_u64(0);
         for _ in 0..10 {
-            let sphere_center: DVec3 = rng.gen::<DVec3>() * 100. - 50.;
-            let sphere_r: f64 = rng.gen::<f64>() * 20.;
+            let sphere_center = rng.gen::<Vec3>() * 100. - 50.;
+            let sphere_r = rng.gen::<f32>() * 20.;
             let sphere = Sphere::new(sphere_center, sphere_r);
 
             let from = loop {
-                let candidate: DVec3 = rng.gen::<DVec3>() * 100. - 50.;
+                let candidate = rng.gen::<Vec3>() * 100. - 50.;
                 if candidate.distance_squared(sphere_center) > sphere_r * sphere_r + 0.0001 {
                     break candidate;
                 }
@@ -160,14 +160,14 @@ mod tests {
     fn random_direction_toward_triangle() {
         let mut rng = SmallRng::seed_from_u64(0);
         for _ in 0..10 {
-            let a: DVec3 = rng.gen::<DVec3>() * 100. - 50.;
-            let b: DVec3 = rng.gen::<DVec3>() * 100. - 50.;
-            let c: DVec3 = rng.gen::<DVec3>() * 100. - 50.;
+            let a = rng.gen::<Vec3>() * 100. - 50.;
+            let b = rng.gen::<Vec3>() * 100. - 50.;
+            let c = rng.gen::<Vec3>() * 100. - 50.;
             let tri = Triangle::new((a, b, c));
 
             let dir = super::random_direction_toward_triangle(a, b, c, &mut rng);
             let ray = Ray {
-                origin: DVec3::ZERO,
+                origin: Vec3::ZERO,
                 dir,
             };
 

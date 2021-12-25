@@ -9,7 +9,6 @@ use triangle::Triangle;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::f32;
-use std::f64;
 use std::sync::Arc;
 use std::sync::Condvar;
 use std::sync::Mutex;
@@ -20,9 +19,8 @@ use std::time::Instant;
 use clap::ArgEnum;
 use clap::Parser;
 
-use glam::DVec2;
-use glam::DVec3;
 use glam::Mat3;
+use glam::Vec2;
 use glam::Vec3;
 
 use minifb::Window;
@@ -40,13 +38,13 @@ const TILE_SIZE: u16 = 64;
 const BACKGROUND: (f32, f32, f32) = (0.471, 0.796, 0.957);
 
 pub struct Ray {
-    pub origin: DVec3,
-    pub dir: DVec3,
+    pub origin: Vec3,
+    pub dir: Vec3,
 }
 
-fn random_unit_vector_in_hemisphere(center: DVec3, rng: &mut SmallRng) -> DVec3 {
+fn random_unit_vector_in_hemisphere(center: Vec3, rng: &mut SmallRng) -> Vec3 {
     let v = UnitSphere.sample(rng);
-    let mut v = DVec3::new(v[0], v[1], v[2]);
+    let mut v = Vec3::new(v[0], v[1], v[2]);
     // Make sure that the vector is in the hemisphere.
     if v.dot(center) < 0. {
         v = -v;
@@ -56,8 +54,8 @@ fn random_unit_vector_in_hemisphere(center: DVec3, rng: &mut SmallRng) -> DVec3 
 
 impl Ray {
     pub fn from_origin_and_random_direction_in_hemisphere(
-        origin: DVec3,
-        center: DVec3,
+        origin: Vec3,
+        center: Vec3,
         rng: &mut SmallRng,
     ) -> Self {
         Self {
@@ -66,7 +64,7 @@ impl Ray {
         }
     }
 
-    pub fn point_from_t(&self, t: f64) -> DVec3 {
+    pub fn point_from_t(&self, t: f32) -> Vec3 {
         self.origin + t * self.dir
     }
 }
@@ -86,20 +84,20 @@ struct SphereObject {
 }
 
 struct Light {
-    pos: DVec3,
+    pos: Vec3,
     power: Vec3,
 }
 
 struct Camera {
-    center: DVec3,
+    center: Vec3,
     // Precomputed values.
-    grid_center: DVec3,
-    grid_right: DVec3,
-    grid_up: DVec3,
+    grid_center: Vec3,
+    grid_right: Vec3,
+    grid_up: Vec3,
 }
 
 impl Camera {
-    fn new(center: DVec3, dir: DVec3, z_near: f64, vertical_fov: f64) -> Self {
+    fn new(center: Vec3, dir: Vec3, z_near: f32, vertical_fov: f32) -> Self {
         let grid_center = center + z_near * dir;
         let grid_scale = 2. * (vertical_fov / 2.).tan() * z_near;
         let (grid_down, grid_left) = spherical::polar_and_azimuthal_vectors_from_radial_vector(dir);
@@ -119,7 +117,7 @@ impl Camera {
     /// corresponding range such that the aspect ratio is respected. For
     /// example, with an aspect ratio of `2:1`, then `x` lies between
     /// `-2` and `2` inclusive.
-    fn ray_for_pixel(&self, x: f64, y: f64) -> Ray {
+    fn ray_for_pixel(&self, x: f32, y: f32) -> Ray {
         let pixel = self.grid_center + x * self.grid_right + y * self.grid_up;
         Ray {
             origin: pixel,
@@ -141,19 +139,19 @@ enum HitObjectInfo<'a> {
     Sphere(&'a SphereObject),
     Triangle {
         triangle: &'a TriangleObject,
-        uv: DVec2,
-        xyz: DVec3,
+        uv: Vec2,
+        xyz: Vec3,
     },
     Nothing,
 }
 
 struct Hit<'a> {
-    t: f64,
+    t: f32,
     obj_info: HitObjectInfo<'a>,
 }
 
 impl<'a> Hit<'a> {
-    fn intersection_normal_albedo(&self, ray: &Ray) -> (DVec3, DVec3, Vec3) {
+    fn intersection_normal_albedo(&self, ray: &Ray) -> (Vec3, Vec3, Vec3) {
         match self.obj_info {
             HitObjectInfo::Sphere(sphere) => {
                 let intersection = ray.point_from_t(self.t);
@@ -173,7 +171,7 @@ impl<'a> Hit<'a> {
 impl Scene {
     fn first_intersection_with_ray(&self, ray: &Ray) -> Hit {
         let mut first = Hit {
-            t: f64::NAN,
+            t: f32::NAN,
             obj_info: HitObjectInfo::Nothing,
         };
 
@@ -218,7 +216,7 @@ impl Scene {
         first
     }
 
-    fn compute_direct_lighting(&self, point: DVec3, normal: DVec3) -> Vec3 {
+    fn compute_direct_lighting(&self, point: Vec3, normal: Vec3) -> Vec3 {
         let mut total = Vec3::ZERO;
 
         'light_iter: for light in self.lights.iter() {
@@ -266,8 +264,8 @@ impl Scene {
 
     fn compute_indirect_lighting(
         &self,
-        point: DVec3,
-        normal: DVec3,
+        point: Vec3,
+        normal: Vec3,
         rng: &mut SmallRng,
         recursion_level: u8,
     ) -> Vec3 {
@@ -352,36 +350,47 @@ impl Scene {
                     let factor = area_by_index[j].1 / ((self.samples - j) / cursor) as f32;
                     let obj = area_by_index[j].0;
 
-                    let (next_intersection, next_ray_dir, next_normal, next_albedo) = if obj < self.spheres.len() {
-                        let sphere = &self.spheres[obj];
-                        let target = spherical::random_look_in_sphere(
-                            intersection,
-                            sphere.sph.center(),
-                            sphere.sph.radius(),
-                            rng,
-                        );
-                        let normal = (target - sphere.sph.center()).normalize();
-                        (target, (target - intersection).normalize(), normal, sphere.mat.albedo)
-                    } else {
-                        let triangle = &self.triangles[obj - self.spheres.len()];
-                        let dir = spherical::random_direction_toward_triangle(
-                            triangle.tri.a() - intersection,
-                            triangle.tri.b() - intersection,
-                            triangle.tri.c() - intersection,
-                            rng,
-                        );
-                        let ray = Ray { origin: intersection, dir };
-                        let t = triangle.tri.t_of_intersection_point_with_ray(&ray);
-                        let pt = ray.point_from_t(t);
-                        (pt, dir, triangle.tri.normal(), triangle.mat.albedo)
-                    };
+                    let (next_intersection, next_ray_dir, next_normal, next_albedo) =
+                        if obj < self.spheres.len() {
+                            let sphere = &self.spheres[obj];
+                            let target = spherical::random_look_in_sphere(
+                                intersection,
+                                sphere.sph.center(),
+                                sphere.sph.radius(),
+                                rng,
+                            );
+                            let normal = (target - sphere.sph.center()).normalize();
+                            (
+                                target,
+                                (target - intersection).normalize(),
+                                normal,
+                                sphere.mat.albedo,
+                            )
+                        } else {
+                            let triangle = &self.triangles[obj - self.spheres.len()];
+                            let dir = spherical::random_direction_toward_triangle(
+                                triangle.tri.a() - intersection,
+                                triangle.tri.b() - intersection,
+                                triangle.tri.c() - intersection,
+                                rng,
+                            );
+                            let ray = Ray {
+                                origin: intersection,
+                                dir,
+                            };
+                            let t = triangle.tri.t_of_intersection_point_with_ray(&ray);
+                            let pt = ray.point_from_t(t);
+                            (pt, dir, triangle.tri.normal(), triangle.mat.albedo)
+                        };
 
-                    let next_direct_lighting = self.compute_direct_lighting(next_intersection, next_normal);
+                    let next_direct_lighting =
+                        self.compute_direct_lighting(next_intersection, next_normal);
                     let next_indirect_lighting =
                         self.compute_indirect_lighting(next_intersection, next_normal, rng, 2);
                     // Compute the cosine of the angle between the ray and the surface normal.
                     let cos_theta = next_ray_dir.dot(normal) as f32;
-                    let intensity = next_albedo * (next_direct_lighting + next_indirect_lighting) * cos_theta;
+                    let intensity =
+                        next_albedo * (next_direct_lighting + next_indirect_lighting) * cos_theta;
 
                     indirect_lighting += intensity * factor;
                     indirect_lighting_area += factor;
@@ -484,7 +493,7 @@ fn main() {
 
     let scene = Arc::new(RwLock::new(Scene {
         spheres: vec![SphereObject {
-            sph: Sphere::new(DVec3::ZERO, 0.7),
+            sph: Sphere::new(Vec3::ZERO, 0.7),
             mat: Material {
                 albedo: Vec3::new(1., 0., 0.),
             },
@@ -492,9 +501,9 @@ fn main() {
         triangles: vec![
             TriangleObject {
                 tri: Triangle::new((
-                    DVec3::new(-50., -50., -0.7),
-                    DVec3::new(50., -50., -0.7),
-                    DVec3::new(-50., 50., -0.7),
+                    Vec3::new(-50., -50., -0.7),
+                    Vec3::new(50., -50., -0.7),
+                    Vec3::new(-50., 50., -0.7),
                 )),
                 mat: Material {
                     albedo: Vec3::new(1., 1., 1.),
@@ -502,9 +511,9 @@ fn main() {
             },
             TriangleObject {
                 tri: Triangle::new((
-                    DVec3::new(50., 50., -0.7),
-                    DVec3::new(-50., 50., -0.7),
-                    DVec3::new(50., -50., -0.7),
+                    Vec3::new(50., 50., -0.7),
+                    Vec3::new(-50., 50., -0.7),
+                    Vec3::new(50., -50., -0.7),
                 )),
                 mat: Material {
                     albedo: Vec3::new(1., 1., 1.),
@@ -512,14 +521,14 @@ fn main() {
             },
         ],
         lights: vec![Light {
-            pos: DVec3::new(10., 17., 50.),
+            pos: Vec3::new(10., 17., 50.),
             power: Vec3::new(1000., 1000., 1000.),
         }],
         camera: Camera::new(
-            DVec3::new(-1.2, 0., 0.3),
-            DVec3::new(1., 0., -0.2).normalize(),
+            Vec3::new(-1.2, 0., 0.3),
+            Vec3::new(1., 0., -0.2).normalize(),
             0.1,
-            80f64.to_radians(),
+            80f32.to_radians(),
         ),
         samples: args.samples,
         aim_rays: args.aim_rays,
@@ -576,8 +585,8 @@ fn main() {
 
                 for y in tile.y_min..tile.y_max {
                     for x in tile.x_min..tile.x_max {
-                        let x_unit = ((x as f64) - (WIDTH as f64) / 2.) / (HEIGHT as f64) * 2.;
-                        let y_unit = ((y as f64) - (HEIGHT as f64) / 2.) / (HEIGHT as f64) * -2.;
+                        let x_unit = ((x as f32) - (WIDTH as f32) / 2.) / (HEIGHT as f32) * 2.;
+                        let y_unit = ((y as f32) - (HEIGHT as f32) / 2.) / (HEIGHT as f32) * -2.;
                         let ray = s.camera.ray_for_pixel(x_unit, y_unit);
 
                         let c = s.ray_trace(&ray, &mut rng);
@@ -601,7 +610,7 @@ fn main() {
         }));
     }
 
-    let mut theta = 0f64;
+    let mut theta = 0f32;
 
     let mut timer = Instant::now();
     let mut render_cnt = 0;
