@@ -353,7 +353,8 @@ impl Scene {
             if cursor > 0 {
                 for i in 0..self.samples {
                     let j = i % cursor;
-                    let factor = area_by_index[j].1 / ((self.samples - j) / cursor) as f32;
+                    let samples_per_j = 1 + (self.samples - j - 1) / cursor;
+                    let factor = area_by_index[j].1 / samples_per_j as f32;
                     let obj = area_by_index[j].0;
 
                     let (next_intersection, next_ray_dir, next_normal, next_albedo) =
