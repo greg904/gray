@@ -1,8 +1,15 @@
+mod sphere;
+mod spherical;
+mod triangle;
 mod view_tiles;
+
+use sphere::Sphere;
+use triangle::Triangle;
 
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::f32;
+use std::f64;
 use std::sync::Arc;
 use std::sync::Condvar;
 use std::sync::Mutex;
@@ -10,7 +17,8 @@ use std::sync::RwLock;
 use std::thread;
 use std::time::Instant;
 
-use glam::DMat2;
+use clap::Parser;
+
 use glam::DVec2;
 use glam::DVec3;
 use glam::Mat3;
@@ -31,9 +39,9 @@ const WORKER_COUNT: usize = 8;
 const TILE_SIZE: u16 = 64;
 const BACKGROUND: (f32, f32, f32) = (0.471, 0.796, 0.957);
 
-struct Ray {
-    origin: DVec3,
-    dir: DVec3,
+pub struct Ray {
+    pub origin: DVec3,
+    pub dir: DVec3,
 }
 
 fn random_unit_vector_in_hemisphere(center: DVec3, rng: &mut SmallRng) -> DVec3 {
@@ -47,7 +55,7 @@ fn random_unit_vector_in_hemisphere(center: DVec3, rng: &mut SmallRng) -> DVec3 
 }
 
 impl Ray {
-    fn from_origin_and_random_direction_in_hemisphere(
+    pub fn from_origin_and_random_direction_in_hemisphere(
         origin: DVec3,
         center: DVec3,
         rng: &mut SmallRng,
@@ -58,7 +66,7 @@ impl Ray {
         }
     }
 
-    fn point_from_t(&self, t: f64) -> DVec3 {
+    pub fn point_from_t(&self, t: f64) -> DVec3 {
         self.origin + t * self.dir
     }
 }
@@ -67,145 +75,14 @@ struct Material {
     albedo: Vec3,
 }
 
-struct Triangle {
-    points: (DVec3, DVec3, DVec3),
-    normal: DVec3,
-    s_xyz: DVec3,
-    t_xyz: DVec3,
-    uv_to_st: DMat2,
+struct TriangleObject {
+    tri: Triangle,
     mat: Material,
 }
 
-impl Triangle {
-    fn new(points: (DVec3, DVec3, DVec3), mat: Material) -> Self {
-        // We will need to find the UV coordinates of any point in the plane that contains the
-        // triangle quickly. One way to do that is to create an orthonormal basis for the
-        // points in the plane, because it will then be easy to get the
-        // coordinates of our point in that base, unlike with the non orthnonormal basis formed
-        // from the triangle's vertices), and then to multiply it by a change of basis matrix to
-        // get the UV coordinates.
-
-        // 1. Create our orthonormal basis.
-        let s_xyz = (points.1 - points.0).normalize();
-        let mut t_xyz = points.2 - points.0;
-        t_xyz -= t_xyz.dot(s_xyz) * s_xyz;
-        t_xyz = t_xyz.normalize();
-
-        // 2. Create the change of basis matrix.
-        let v_xyz = points.2 - points.0;
-        let u_st = DVec2::new((points.1 - points.0).length(), 0f64);
-        let v_st = DVec2::new(v_xyz.dot(s_xyz), v_xyz.dot(t_xyz));
-        let st_to_uv = DMat2::from_cols(u_st, v_st);
-        let uv_to_st = st_to_uv.inverse();
-
-        Triangle {
-            points,
-            normal: (points.1 - points.0).cross(points.2 - points.0).normalize(),
-            s_xyz,
-            t_xyz,
-            uv_to_st,
-            mat,
-        }
-    }
-
-    /// Returns the `t` parameter of the point of intersection between the ray and the plane that
-    /// contains the triangle, or `NaN` if there is none. Note that although the intersection
-    /// point is in the plane that contains the triangle, it could still be outside the triangle.
-    fn t_of_intersection_point_with_ray(&self, ray: &Ray) -> f64 {
-        -((ray.origin - self.points.0).dot(self.normal)) / ray.dir.dot(self.normal)
-    }
-
-    /// Returns the UV coordinates of a point in space, assuming that the point is in the plane
-    /// that contains the triangle.
-    fn uv_of_point(&self, point_xyz: DVec3) -> DVec2 {
-        // Get the coordinates of the point in the orthonormal basis.
-        let point_st = DVec2::new(
-            (point_xyz - self.points.0).dot(self.s_xyz),
-            (point_xyz - self.points.0).dot(self.t_xyz),
-        );
-        // Use the change of basis matrix.
-        self.uv_to_st * point_st
-    }
-
-    /// Returns whether the given UV coordinates are inside the triangle or not.
-    fn uv_is_inside(uv: DVec2) -> bool {
-        uv.x >= 0. && uv.y >= 0. && uv.x + uv.y <= 1.
-    }
-
-    /// Converts UV coordinates to world coordinates.
-    fn point_from_uv(&self, uv: DVec2) -> DVec3 {
-        self.points.0
-            + uv.x * (self.points.1 - self.points.0)
-            + uv.y * (self.points.2 - self.points.0)
-    }
-}
-
-struct Sphere {
-    center: DVec3,
-    radius_sqr: f64,
+struct SphereObject {
+    sph: Sphere,
     mat: Material,
-}
-
-impl Sphere {
-    fn new(center: DVec3, radius: f64, mat: Material) -> Self {
-        Self {
-            center,
-            radius_sqr: radius * radius,
-            mat,
-        }
-    }
-
-    fn t_of_intersection_point_with_ray(&self, ray: &Ray) -> Option<f64> {
-        // Let $O(x_O,y_O,z_O)$ be the center of the sphere, $R(x_R,y_R,z_R)$ the starting point of the ray and $\vec{u}(x_u,y_u,z_u)$ a unit vector for the direction of the ray.
-        //
-        // A point $M(x,y,z)$ on the ray is described by its parameter $t \in \mathbb{R}_+$ by the following equations : $x = x_R + tx_u,$ $y = y_R + ty_u,$ and $z = z_R + tz_u.$
-        //
-        // The equation of the sphere is: $(x - x_O)^2 + (y - y_O)^2 + (z - z_O)^2 = r^2.$
-        //
-        // By combining the two equations, we find the points of intersection between the ray and the sphere:
-        // \begin{gather*}
-        // (x_R + tx_u - x_O)^2 + (y_R + ty_u - y_O)^2 + (z_R + tz_u - z_O)^2 = r^2\\
-        // (tx_u + (x_R - x_O))^2 + (ty_u + (y_R - y_O))^2 + (tz_u + (z_R - z_O))^2 = r^2
-        // \end{gather*}
-        // \begin{align*}
-        // &t^2x_u^2 + 2tx_u(x_R - x_O) + (x_R - x_O)^2\\
-        // 	+ &t^2y_u^2 + 2ty_u(y_R - y_O) + (y_R - y_O)^2\\
-        // 	+ &t^2z_u^2 + 2tz_u(z_R - z_O) + (z_R - z_O)^2 = r^2
-        // \end{align*}
-        // \begin{align*}
-        // &(x_u^2 + y_u^2 + z_u^2)t^2\\
-        // + &(2x_u(x_R - x_O) + 2y_u(y_R - y_O) + 2z_u(z_R - z_O))t\\
-        // + &(x_R - x_O)^2 + (y_R - y_O)^2 + (z_R - z_O)^2 - r^2 = 0
-        // \end{align*}
-        //
-        // This is a quadratic equation which we can solve.
-        let a = ray.dir.length_squared();
-        let b = 2. * ray.dir.dot(ray.origin - self.center);
-        let b_sqr = b * b;
-        let c = (ray.origin - self.center).length_squared() - self.radius_sqr;
-        let discriminant = b_sqr - 4. * a * c;
-        if discriminant < 0. {
-            return None;
-        }
-        let discriminant_sqrt = discriminant.sqrt();
-        // If both `t_0` and `t_1` are negative, the sphere is behind the ray.
-        // If one is positive and the other is negative, the ray origin is inside the sphere.
-        // In that case, we do not want to count the intersection because our spheres are only
-        // made up of the exterior surface. This allows shooting a ray from a point on the
-        // sphere without caring about intersecting that same sphere again without convoluted
-        // tricks.
-        let t_0 = (-b - discriminant_sqrt) / (2. * a);
-        if t_0 < 0. {
-            return None;
-        }
-        let t_1 = (-b + discriminant_sqrt) / (2. * a);
-        if t_1 < 0. {
-            return None;
-        }
-        // Take the first point on the ray, that is the point with the smallest parameter.
-        let t = t_0.min(t_1);
-        Some(t)
-    }
 }
 
 struct Light {
@@ -225,8 +102,9 @@ impl Camera {
     fn new(center: DVec3, dir: DVec3, z_near: f64, vertical_fov: f64) -> Self {
         let grid_center = center + z_near * dir;
         let grid_scale = 2. * (vertical_fov / 2.).tan() * z_near;
-        let grid_right = grid_scale * dir.cross(DVec3::Z).normalize();
-        let grid_up = grid_scale * grid_right.cross(dir).normalize();
+        let (grid_down, grid_left) = spherical::polar_and_azimuthal_vectors_from_radial_vector(dir);
+        let grid_right = -grid_scale * grid_left;
+        let grid_up = -grid_scale * grid_down;
         Self {
             center,
             grid_center,
@@ -251,16 +129,17 @@ impl Camera {
 }
 
 struct Scene {
-    spheres: Vec<Sphere>,
-    triangles: Vec<Triangle>,
+    spheres: Vec<SphereObject>,
+    triangles: Vec<TriangleObject>,
     lights: Vec<Light>,
     camera: Camera,
+    aim_rays: bool,
 }
 
 enum HitObjectInfo<'a> {
-    Sphere(&'a Sphere),
+    Sphere(&'a SphereObject),
     Triangle {
-        triangle: &'a Triangle,
+        triangle: &'a TriangleObject,
         uv: DVec2,
         xyz: DVec3,
     },
@@ -277,14 +156,14 @@ impl<'a> Hit<'a> {
         match self.obj_info {
             HitObjectInfo::Sphere(sphere) => {
                 let intersection = ray.point_from_t(self.t);
-                let normal = (intersection - sphere.center).normalize();
+                let normal = (intersection - sphere.sph.center()).normalize();
                 (intersection, normal, sphere.mat.albedo)
             }
             HitObjectInfo::Triangle {
                 triangle,
                 xyz,
                 uv: _uv,
-            } => (xyz, triangle.normal, triangle.mat.albedo),
+            } => (xyz, triangle.tri.normal(), triangle.mat.albedo),
             HitObjectInfo::Nothing => unreachable!(),
         }
     }
@@ -298,7 +177,7 @@ impl Scene {
         };
 
         for sphere in self.spheres.iter() {
-            let t = match sphere.t_of_intersection_point_with_ray(ray) {
+            let t = match sphere.sph.t_of_intersection_point_with_ray(ray) {
                 Some(val) => val,
                 None => continue,
             };
@@ -312,20 +191,20 @@ impl Scene {
         }
 
         for triangle in self.triangles.iter() {
-            let t = triangle.t_of_intersection_point_with_ray(ray);
+            let t = triangle.tri.t_of_intersection_point_with_ray(ray);
             if t.is_nan() || t < 0. {
                 continue;
             }
             if t >= first.t {
                 continue;
             }
-            if ray.dir.dot(triangle.normal) >= 0. {
+            if ray.dir.dot(triangle.tri.normal()) >= 0. {
                 // The triangle can only be seen when its normal is pointing
                 // toward us.
                 continue;
             }
             let xyz = ray.point_from_t(t);
-            let uv = triangle.uv_of_point(xyz);
+            let uv = triangle.tri.uv_of_point(xyz);
             if !Triangle::uv_is_inside(uv) {
                 continue;
             }
@@ -351,24 +230,24 @@ impl Scene {
             };
             let light_t = point_to_light.length();
             for sphere in self.spheres.iter() {
-                if let Some(t) = sphere.t_of_intersection_point_with_ray(&ray) {
+                if let Some(t) = sphere.sph.t_of_intersection_point_with_ray(&ray) {
                     if t <= light_t {
                         continue 'light_iter;
                     }
                 }
             }
             for triangle in self.triangles.iter() {
-                let t = triangle.t_of_intersection_point_with_ray(&ray);
+                let t = triangle.tri.t_of_intersection_point_with_ray(&ray);
                 if t.is_nan() || t > light_t {
                     continue;
                 }
-                if ray.dir.dot(triangle.normal) >= 0. {
+                if ray.dir.dot(triangle.tri.normal()) >= 0. {
                     // The triangle can only be seen when its normal is pointing
                     // toward us.
                     continue;
                 }
                 let xyz = ray.point_from_t(t);
-                let uv = triangle.uv_of_point(xyz);
+                let uv = triangle.tri.uv_of_point(xyz);
                 if !Triangle::uv_is_inside(uv) {
                     continue;
                 }
@@ -423,10 +302,100 @@ impl Scene {
         let direct_lighting = self.compute_direct_lighting(intersection, normal);
 
         let mut indirect_lighting = Vec3::ZERO;
-        for _ in 0..SAMPLES {
-            indirect_lighting += self.compute_indirect_lighting(intersection, normal, rng, 1);
+
+        if self.aim_rays {
+            let mut area_by_index: [(usize, f32); SAMPLES] = [(usize::MAX, 0.); SAMPLES];
+            let mut cursor = 0;
+            let mut total_area = 0.;
+
+            let mut indirect_lighting_area = 0.;
+
+            for (i, sphere) in self.spheres.iter().enumerate() {
+                // The sphere is visible from our side.
+                if normal.dot(sphere.sph.center() - intersection) <= 0. {
+                    continue;
+                }
+                let d = sphere.sph.center().distance(intersection) as f32;
+                let r = sphere.sph.radius() as f32;
+                let area = spherical::area_of_sphere_projected_to_unit_sphere(d, r);
+                if area <= 0.00001 {
+                    continue;
+                }
+                area_by_index[cursor] = (i, area);
+                cursor += 1;
+                total_area += area;
+            }
+
+            for (i, triangle) in self.triangles.iter().enumerate() {
+                // The triangle is visible from our side.
+                if triangle.tri.normal().dot(triangle.tri.a() - intersection) >= 0. {
+                    continue;
+                }
+                let a_ = (triangle.tri.a() - intersection).normalize();
+                let b_ = (triangle.tri.b() - intersection).normalize();
+                let c_ = (triangle.tri.c() - intersection).normalize();
+                let area = spherical::area_of_intersection_of_spherical_triangle_and_unit_hemisphere(
+                    a_, b_, c_, 1., normal,
+                ) as f32;
+                if area <= 0.00001 {
+                    continue;
+                }
+                area_by_index[cursor] = (self.spheres.len() + i, area);
+                cursor += 1;
+                total_area += area;
+            }
+
+            if cursor > 0 {
+                for i in 0..SAMPLES {
+                    let j = i % cursor;
+                    let divisor = ((SAMPLES - j) / cursor) as f32;
+                    let obj = area_by_index[j].0;
+                    let next_ray_dir = if obj < self.spheres.len() {
+                        let sphere = &self.spheres[obj];
+                        let target = spherical::random_look_in_sphere(
+                            intersection,
+                            sphere.sph.center(),
+                            sphere.sph.radius(),
+                            rng,
+                        );
+                        (target - intersection).normalize()
+                    } else {
+                        let triangle = &self.triangles[obj - self.spheres.len()];
+                        spherical::random_direction_toward_triangle(
+                            triangle.tri.a() - intersection,
+                            triangle.tri.b() - intersection,
+                            triangle.tri.c() - intersection,
+                            rng,
+                        )
+                    };
+                    let next_ray = Ray {
+                        origin: intersection,
+                        dir: next_ray_dir,
+                    };
+                    // Compute the cosine of the angle between the ray and the surface normal.
+                    let cos_theta = next_ray.dir.dot(normal) as f32;
+                    let intensity = self.ray_trace_indirect(&next_ray, rng, 1) * cos_theta;
+                    indirect_lighting += intensity * area_by_index[j].1 / divisor;
+                    indirect_lighting_area += area_by_index[j].1 / divisor;
+                }
+            }
+
+            let ambient_area = 2. * f32::consts::PI - total_area;
+            if ambient_area > 0. {
+                let indirect_lighting_cos_theta_factor = 0.5;
+                indirect_lighting += Vec3::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2)
+                    * indirect_lighting_cos_theta_factor
+                    * ambient_area;
+                indirect_lighting_area += ambient_area;
+            }
+
+            indirect_lighting /= indirect_lighting_area;
+        } else {
+            for _ in 0..SAMPLES {
+                indirect_lighting += self.compute_indirect_lighting(intersection, normal, rng, 1);
+            }
+            indirect_lighting /= SAMPLES as f32;
         }
-        indirect_lighting /= SAMPLES as f32;
 
         albedo * (direct_lighting + indirect_lighting)
     }
@@ -477,39 +446,47 @@ struct SendMutPtr<T>(*mut T);
 
 unsafe impl<T> Send for SendMutPtr<T> {}
 
+#[derive(Parser)]
+struct Args {
+    /// Aim rays to the primitives instead of picking random directions.
+    #[clap(long)]
+    aim_rays: bool,
+}
+
 fn main() {
+    let args = Args::parse();
+
     let mut window = Window::new("gray", WIDTH, HEIGHT, WindowOptions::default())
         .expect("failed to create window");
 
     let scene = Arc::new(RwLock::new(Scene {
-        spheres: vec![Sphere::new(
-            DVec3::ZERO,
-            0.7,
-            Material {
+        spheres: vec![SphereObject {
+            sph: Sphere::new(DVec3::ZERO, 0.7),
+            mat: Material {
                 albedo: Vec3::new(1., 0., 0.),
             },
-        )],
+        }],
         triangles: vec![
-            Triangle::new(
-                (
+            TriangleObject {
+                tri: Triangle::new((
                     DVec3::new(-50., -50., -0.7),
                     DVec3::new(50., -50., -0.7),
                     DVec3::new(-50., 50., -0.7),
-                ),
-                Material {
+                )),
+                mat: Material {
                     albedo: Vec3::new(1., 1., 1.),
                 },
-            ),
-            Triangle::new(
-                (
+            },
+            TriangleObject {
+                tri: Triangle::new((
                     DVec3::new(50., 50., -0.7),
                     DVec3::new(-50., 50., -0.7),
                     DVec3::new(50., -50., -0.7),
-                ),
-                Material {
+                )),
+                mat: Material {
                     albedo: Vec3::new(1., 1., 1.),
                 },
-            ),
+            },
         ],
         lights: vec![Light {
             pos: DVec3::new(10., 17., 50.),
@@ -521,6 +498,7 @@ fn main() {
             0.1,
             80f64.to_radians(),
         ),
+        aim_rays: args.aim_rays,
     }));
 
     let tiles = Arc::new(view_tiles::Tiles::new(
@@ -617,7 +595,7 @@ fn main() {
 
         {
             let mut s = scene.write().unwrap();
-            s.spheres[0].center.y = 0.3 * theta.cos();
+            s.spheres[0].sph.center_mut().y = 0.3 * theta.cos();
         }
 
         {
