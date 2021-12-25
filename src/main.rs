@@ -221,12 +221,17 @@ impl Scene {
 
         'light_iter: for light in self.lights.iter() {
             let point_to_light = light.pos - point;
-
-            // Check if something is hiding the light.
             let ray = Ray {
                 dir: point_to_light.normalize(),
                 origin: point,
             };
+
+            let cos_theta = normal.dot(ray.dir) as f32;
+            if cos_theta <= 0. {
+                continue 'light_iter;
+            }
+
+            // Check if something is hiding the light.
             let light_t = point_to_light.length();
             for sphere in self.spheres.iter() {
                 if let Some(t) = sphere.sph.t_of_intersection_point_with_ray(&ray) {
@@ -253,7 +258,6 @@ impl Scene {
                 continue 'light_iter;
             }
 
-            let cos_theta = normal.dot(ray.dir) as f32;
             let d = light_t as f32;
             let point_light_factor = cos_theta.max(0.) / (4. * f32::consts::PI * d * d);
             total += point_light_factor * light.power;
