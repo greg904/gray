@@ -349,9 +349,10 @@ impl Scene {
             if cursor > 0 {
                 for i in 0..SAMPLES {
                     let j = i % cursor;
-                    let divisor = ((SAMPLES - j) / cursor) as f32;
+                    let factor = area_by_index[j].1 / ((SAMPLES - j) / cursor) as f32;
                     let obj = area_by_index[j].0;
-                    let next_ray_dir = if obj < self.spheres.len() {
+
+                    let (next_intersection, next_ray_dir, next_normal, next_albedo) = if obj < self.spheres.len() {
                         let sphere = &self.spheres[obj];
                         let target = spherical::random_look_in_sphere(
                             intersection,
@@ -359,25 +360,31 @@ impl Scene {
                             sphere.sph.radius(),
                             rng,
                         );
-                        (target - intersection).normalize()
+                        let normal = (target - sphere.sph.center()).normalize();
+                        (target, (target - intersection).normalize(), normal, sphere.mat.albedo)
                     } else {
                         let triangle = &self.triangles[obj - self.spheres.len()];
-                        spherical::random_direction_toward_triangle(
+                        let dir = spherical::random_direction_toward_triangle(
                             triangle.tri.a() - intersection,
                             triangle.tri.b() - intersection,
                             triangle.tri.c() - intersection,
                             rng,
-                        )
+                        );
+                        let ray = Ray { origin: intersection, dir };
+                        let t = triangle.tri.t_of_intersection_point_with_ray(&ray);
+                        let pt = ray.point_from_t(t);
+                        (pt, dir, triangle.tri.normal(), triangle.mat.albedo)
                     };
-                    let next_ray = Ray {
-                        origin: intersection,
-                        dir: next_ray_dir,
-                    };
+
+                    let next_direct_lighting = self.compute_direct_lighting(next_intersection, next_normal);
+                    let next_indirect_lighting =
+                        self.compute_indirect_lighting(next_intersection, next_normal, rng, 2);
                     // Compute the cosine of the angle between the ray and the surface normal.
-                    let cos_theta = next_ray.dir.dot(normal) as f32;
-                    let intensity = self.ray_trace_indirect(&next_ray, rng, 1) * cos_theta;
-                    indirect_lighting += intensity * area_by_index[j].1 / divisor;
-                    indirect_lighting_area += area_by_index[j].1 / divisor;
+                    let cos_theta = next_ray_dir.dot(normal) as f32;
+                    let intensity = next_albedo * (next_direct_lighting + next_indirect_lighting) * cos_theta;
+
+                    indirect_lighting += intensity * factor;
+                    indirect_lighting_area += factor;
                 }
             }
 
