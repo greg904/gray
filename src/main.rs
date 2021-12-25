@@ -273,6 +273,10 @@ impl Scene {
         rng: &mut SmallRng,
         recursion_level: u8,
     ) -> Vec3 {
+        if recursion_level >= 2 {
+            return Vec3::ZERO;
+        }
+
         let next_ray = Ray::from_origin_and_random_direction_in_hemisphere(point, normal, rng);
         // Compute the cosine of the angle between the ray and the surface normal.
         let cos_theta = next_ray.dir.dot(normal) as f32;
@@ -280,10 +284,6 @@ impl Scene {
     }
 
     fn ray_trace_indirect(&self, ray: &Ray, rng: &mut SmallRng, recursion_level: u8) -> Vec3 {
-        if recursion_level > 2 {
-            return Vec3::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2);
-        }
-
         let closest_hit = self.first_intersection_with_ray(ray);
         if closest_hit.t.is_nan() {
             return Vec3::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2);
