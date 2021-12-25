@@ -17,6 +17,7 @@ use std::sync::RwLock;
 use std::thread;
 use std::time::Instant;
 
+use clap::ArgEnum;
 use clap::Parser;
 
 use glam::DVec2;
@@ -446,15 +447,26 @@ struct SendMutPtr<T>(*mut T);
 
 unsafe impl<T> Send for SendMutPtr<T> {}
 
+#[derive(ArgEnum, Copy, Clone)]
+enum ToneMap {
+    GammaEncode,
+    AcesLike,
+}
+
 #[derive(Parser)]
 struct Args {
     /// Aim rays to the primitives instead of picking random directions.
     #[clap(long)]
     aim_rays: bool,
+
+    /// The tone mapping mode.
+    #[clap(long, arg_enum, default_value = "gamma-encode")]
+    tone_map: ToneMap,
 }
 
 fn main() {
     let args = Args::parse();
+    let tone_map = args.tone_map;
 
     let mut window = Window::new("gray", WIDTH, HEIGHT, WindowOptions::default())
         .expect("failed to create window");
@@ -557,7 +569,10 @@ fn main() {
                         let ray = s.camera.ray_for_pixel(x_unit, y_unit);
 
                         let c = s.ray_trace(&ray, &mut rng);
-                        let c = gamma_encode(c);
+                        let c = match tone_map {
+                            ToneMap::GammaEncode => gamma_encode(c),
+                            ToneMap::AcesLike => aces_fit(c),
+                        };
                         let c = ((f32_to_u8(c.x) as u32) << 16)
                             | ((f32_to_u8(c.y) as u32) << 8)
                             | (f32_to_u8(c.z) as u32);
