@@ -35,7 +35,6 @@ use rand_distr::UnitSphere;
 
 const WIDTH: usize = 1080;
 const HEIGHT: usize = 720;
-const SAMPLES: usize = 200;
 const WORKER_COUNT: usize = 8;
 const TILE_SIZE: u16 = 64;
 const BACKGROUND: (f32, f32, f32) = (0.471, 0.796, 0.957);
@@ -134,6 +133,7 @@ struct Scene {
     triangles: Vec<TriangleObject>,
     lights: Vec<Light>,
     camera: Camera,
+    samples: usize,
     aim_rays: bool,
 }
 
@@ -305,7 +305,7 @@ impl Scene {
         let mut indirect_lighting = Vec3::ZERO;
 
         if self.aim_rays {
-            let mut area_by_index: [(usize, f32); SAMPLES] = [(usize::MAX, 0.); SAMPLES];
+            let mut area_by_index: [(usize, f32); 10] = [(usize::MAX, 0.); 10];
             let mut cursor = 0;
             let mut total_area = 0.;
 
@@ -347,9 +347,9 @@ impl Scene {
             }
 
             if cursor > 0 {
-                for i in 0..SAMPLES {
+                for i in 0..self.samples {
                     let j = i % cursor;
-                    let factor = area_by_index[j].1 / ((SAMPLES - j) / cursor) as f32;
+                    let factor = area_by_index[j].1 / ((self.samples - j) / cursor) as f32;
                     let obj = area_by_index[j].0;
 
                     let (next_intersection, next_ray_dir, next_normal, next_albedo) = if obj < self.spheres.len() {
@@ -399,10 +399,10 @@ impl Scene {
 
             indirect_lighting /= indirect_lighting_area;
         } else {
-            for _ in 0..SAMPLES {
+            for _ in 0..self.samples {
                 indirect_lighting += self.compute_indirect_lighting(intersection, normal, rng, 1);
             }
-            indirect_lighting /= SAMPLES as f32;
+            indirect_lighting /= self.samples as f32;
         }
 
         albedo * (direct_lighting + indirect_lighting)
@@ -469,6 +469,10 @@ struct Args {
     /// The tone mapping mode.
     #[clap(long, arg_enum, default_value = "gamma-encode")]
     tone_map: ToneMap,
+
+    /// The amount of samples per pixel.
+    #[clap(short, long, default_value = "5")]
+    samples: usize,
 }
 
 fn main() {
@@ -517,6 +521,7 @@ fn main() {
             0.1,
             80f64.to_radians(),
         ),
+        samples: args.samples,
         aim_rays: args.aim_rays,
     }));
 
