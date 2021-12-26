@@ -156,9 +156,11 @@ impl<'a> RayTracer<'a> {
             return Vec3::ZERO;
         }
 
-        let next_ray = Ray::from_origin_and_random_direction_in_hemisphere(point, normal, rng);
-        // Compute the cosine of the angle between the ray and the surface normal.
-        let cos_theta = next_ray.dir.dot(normal) as f32;
+        let (dir, cos_theta) = crate::random_unit_vector_in_hemisphere_and_cos_theta(normal, rng);
+        let next_ray = Ray {
+            origin: point,
+            dir,
+        };
         self.ray_trace_indirect(&next_ray, rng, recursion_level + 1) * cos_theta
     }
 

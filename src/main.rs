@@ -53,25 +53,16 @@ pub struct Ray {
     pub dir: Vec3,
 }
 
-fn random_unit_vector_in_hemisphere(center: Vec3, rng: &mut SmallRng) -> Vec3 {
+pub fn random_unit_vector_in_hemisphere_and_cos_theta(center: Vec3, rng: &mut SmallRng) -> (Vec3, f32) {
     let v = UnitSphere.sample(rng);
     let v = Vec3::new(v[0], v[1], v[2]);
+    let dot = v.dot(center);
+    let sign = 1f32.copysign(dot);
     // Make sure that the vector is in the hemisphere.
-    v / 1f32.copysign(v.dot(center))
+    (v / sign, dot / sign)
 }
 
 impl Ray {
-    pub fn from_origin_and_random_direction_in_hemisphere(
-        origin: Vec3,
-        center: Vec3,
-        rng: &mut SmallRng,
-    ) -> Self {
-        Self {
-            origin,
-            dir: random_unit_vector_in_hemisphere(center, rng),
-        }
-    }
-
     pub fn point_from_t(&self, t: f32) -> Vec3 {
         self.origin + t * self.dir
     }
