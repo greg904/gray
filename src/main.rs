@@ -1,5 +1,6 @@
 mod light;
 mod rasterize;
+mod ray_trace;
 mod scene;
 mod sphere;
 mod spherical;
@@ -8,11 +9,12 @@ mod view_tiles;
 
 use light::Light;
 use rasterize::Rasterizer;
-use sphere::Sphere;
+use ray_trace::RayTracer;
+use scene::Material;
 use scene::Scene;
 use scene::SphereObject;
 use scene::TriangleObject;
-use scene::Material;
+use sphere::Sphere;
 use triangle::Triangle;
 
 use std::convert::TryFrom;
@@ -30,8 +32,6 @@ use clap::Parser;
 
 use glam::Affine3A;
 use glam::Mat3;
-use glam::Mat3A;
-use glam::Vec2;
 use glam::Vec3;
 
 use minifb::Window;
@@ -203,6 +203,9 @@ fn main() {
     let args = Args::parse();
     let tone_map = args.tone_map;
     let rasterize = args.rasterize;
+    let aim_rays = args.aim_rays;
+    let bounces = args.bounces;
+    let samples = args.samples;
 
     let mut window = Window::new("gray", WIDTH, HEIGHT, WindowOptions::default())
         .expect("failed to create window");
@@ -246,9 +249,6 @@ fn main() {
             0.1,
             80f32.to_radians(),
         ),
-        samples: args.samples,
-        bounces: args.bounces,
-        aim_rays: args.aim_rays,
     }));
 
     let tiles = Arc::new(view_tiles::Tiles::new(
@@ -328,7 +328,13 @@ fn main() {
                             let y_unit =
                                 ((y as f32) - (HEIGHT as f32) / 2.) / (HEIGHT as f32) * -2.;
                             let ray = s.camera.ray_for_pixel(x_unit, y_unit);
-                            s.ray_trace(&ray, &mut rng)
+                            let ray_tracer = RayTracer {
+                                aim_rays,
+                                bounces,
+                                samples,
+                                scene: &s,
+                            };
+                            ray_tracer.ray_trace(&ray, &mut rng)
                         };
 
                         let c = match tone_map {
