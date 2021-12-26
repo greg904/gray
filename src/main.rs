@@ -391,7 +391,7 @@ fn main() {
             }
         }
 
-        {
+        if rasterize {
             let mut r = rasterizer.write().unwrap();
             r.clear(u32::MAX);
 
