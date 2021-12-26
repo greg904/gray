@@ -55,12 +55,9 @@ pub struct Ray {
 
 fn random_unit_vector_in_hemisphere(center: Vec3, rng: &mut SmallRng) -> Vec3 {
     let v = UnitSphere.sample(rng);
-    let mut v = Vec3::new(v[0], v[1], v[2]);
+    let v = Vec3::new(v[0], v[1], v[2]);
     // Make sure that the vector is in the hemisphere.
-    if v.dot(center) < 0. {
-        v = -v;
-    }
-    v
+    v / 1f32.copysign(v.dot(center))
 }
 
 impl Ray {
