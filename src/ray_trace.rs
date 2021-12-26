@@ -21,6 +21,7 @@ pub struct RayTracer<'a> {
     pub samples: usize,
     pub bounces: u8,
     pub aim_rays: bool,
+    pub use_avg_diffuse: bool,
 }
 
 enum HitObjectInfo<'a> {
@@ -138,13 +139,13 @@ impl<'a> RayTracer<'a> {
         point_light_factor_times_4pi * *light.power_over_4pi()
     }
 
-    fn compute_direct_lighting(&self, point: Vec3, normal: Vec3) -> Vec3 {
+    pub fn compute_direct_lighting(&self, point: Vec3, normal: Vec3) -> Vec3 {
         self.scene.lights.iter().fold(Vec3::ZERO, |acc, l| {
             acc + self.compute_direct_lighting_for_light(point, normal, l)
         })
     }
 
-    fn compute_indirect_lighting(
+    pub fn compute_indirect_lighting(
         &self,
         point: Vec3,
         normal: Vec3,
@@ -234,7 +235,6 @@ impl<'a> RayTracer<'a> {
                 for i in 0..self.samples {
                     let j = i % cursor;
                     let samples_per_j = 1 + (self.samples - j - 1) / cursor;
-                    let factor = area_by_index[j].1 / samples_per_j as f32;
                     let obj = area_by_index[j].0;
 
                     let (next_intersection, next_ray_dir, next_normal, next_albedo) =
@@ -270,17 +270,30 @@ impl<'a> RayTracer<'a> {
                             (pt, dir, triangle.tri.normal(), triangle.mat.albedo)
                         };
 
-                    let next_direct_lighting =
-                        self.compute_direct_lighting(next_intersection, next_normal);
-                    let next_indirect_lighting =
-                        self.compute_indirect_lighting(next_intersection, next_normal, rng, 2);
-                    // Compute the cosine of the angle between the ray and the surface normal.
-                    let cos_theta = next_ray_dir.dot(normal) as f32;
-                    let intensity =
-                        next_albedo * (next_direct_lighting + next_indirect_lighting) * cos_theta;
+                    let area = area_by_index[j].1;
+                    let sample_probability = 1. / samples_per_j as f32;
 
-                    indirect_lighting += intensity * factor;
-                    indirect_lighting_area += factor;
+                    let cos_theta = next_ray_dir.dot(normal) as f32;
+                    if cos_theta > 0. {
+                        let area_cos_theta = area * cos_theta;
+                        let diffuse = if self.use_avg_diffuse && area_cos_theta < 0.4 {
+                            self.scene.primitives_avg_diffuse[obj]
+                        } else {
+                            let next_direct_lighting =
+                                self.compute_direct_lighting(next_intersection, next_normal);
+                            let next_indirect_lighting = self.compute_indirect_lighting(
+                                next_intersection,
+                                next_normal,
+                                rng,
+                                2,
+                            );
+                            next_albedo * (next_direct_lighting + next_indirect_lighting)
+                        };
+
+                        indirect_lighting += diffuse * area_cos_theta * sample_probability;
+                    }
+
+                    indirect_lighting_area += area * sample_probability;
                 }
             }
 

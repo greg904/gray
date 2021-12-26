@@ -105,4 +105,8 @@ impl Triangle {
     pub fn c(&self) -> Vec3 {
         self.points.2
     }
+
+    pub fn barycenter(&self) -> Vec3 {
+        (self.points.0 + self.points.1 + self.points.2) / 3.
+    }
 }

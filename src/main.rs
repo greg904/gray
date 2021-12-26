@@ -197,6 +197,10 @@ struct Args {
     /// Use rasterization instead of the first ray.
     #[clap(short, long)]
     rasterize: bool,
+
+    /// Pre-compute the average diffuse of primitives and use it for approximations.
+    #[clap(long)]
+    avg_diffuse: bool,
 }
 
 fn main() {
@@ -206,6 +210,7 @@ fn main() {
     let aim_rays = args.aim_rays;
     let bounces = args.bounces;
     let samples = args.samples;
+    let avg_diffuse = args.avg_diffuse;
 
     let mut window = Window::new("gray", WIDTH, HEIGHT, WindowOptions::default())
         .expect("failed to create window");
@@ -239,6 +244,7 @@ fn main() {
                 },
             },
         ],
+        primitives_avg_diffuse: vec![Vec3::ZERO; 3],
         lights: vec![Light::new(
             Vec3::new(10., 17., 50.),
             Vec3::new(8000., 8000., 8000.),
@@ -332,6 +338,7 @@ fn main() {
                                 aim_rays,
                                 bounces,
                                 samples,
+                                use_avg_diffuse: avg_diffuse,
                                 scene: &s,
                             };
                             ray_tracer.ray_trace(&ray, &mut rng)
@@ -378,6 +385,10 @@ fn main() {
         {
             let mut s = scene.write().unwrap();
             s.spheres[0].sph.center_mut().y = 0.3 * theta.cos();
+
+            if args.avg_diffuse {
+                s.compute_primitives_avg_diffuse();
+            }
         }
 
         {
