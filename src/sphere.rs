@@ -1,13 +1,13 @@
-use glam::Vec3;
+use glam::Vec3A;
 
 pub struct Sphere {
-    center: Vec3,
+    center: Vec3A,
     radius: f32,
     radius_sqr: f32,
 }
 
 impl Sphere {
-    pub fn new(center: Vec3, radius: f32) -> Self {
+    pub fn new(center: Vec3A, radius: f32) -> Self {
         Self {
             center,
             radius,
@@ -63,11 +63,11 @@ impl Sphere {
         t_0
     }
 
-    pub fn center(&self) -> &Vec3 {
+    pub fn center(&self) -> &Vec3A {
         &self.center
     }
 
-    pub fn center_mut(&mut self) -> &mut Vec3 {
+    pub fn center_mut(&mut self) -> &mut Vec3A {
         &mut self.center
     }
 

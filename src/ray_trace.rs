@@ -12,7 +12,7 @@ use crate::BACKGROUND;
 use std::f32;
 
 use glam::Vec2;
-use glam::Vec3;
+use glam::Vec3A;
 
 use rand::rngs::SmallRng;
 
@@ -29,7 +29,7 @@ enum HitObjectInfo<'a> {
     Triangle {
         triangle: &'a TriangleObject,
         uv: Vec2,
-        xyz: Vec3,
+        xyz: Vec3A,
     },
     Nothing,
 }
@@ -40,7 +40,7 @@ struct Hit<'a> {
 }
 
 impl<'a> Hit<'a> {
-    fn intersection_normal_albedo(&self, ray: &Ray) -> (Vec3, Vec3, Vec3) {
+    fn intersection_normal_albedo(&self, ray: &Ray) -> (Vec3A, Vec3A, Vec3A) {
         match self.obj_info {
             HitObjectInfo::Sphere(sphere) => {
                 let intersection = ray.point_from_t(self.t);
@@ -100,11 +100,11 @@ impl<'a> RayTracer<'a> {
         first
     }
 
-    fn compute_direct_lighting_for_light(&self, point: Vec3, normal: Vec3, light: &Light) -> Vec3 {
+    fn compute_direct_lighting_for_light(&self, point: Vec3A, normal: Vec3A, light: &Light) -> Vec3A {
         let point_to_light = *light.pos() - point;
         let d_cos_theta = normal.dot(point_to_light);
         if d_cos_theta <= 0. {
-            return Vec3::ZERO;
+            return Vec3A::ZERO;
         }
         let d = point_to_light.length();
 
@@ -117,7 +117,7 @@ impl<'a> RayTracer<'a> {
             let t = sphere.sph.t_of_intersection_point_with_ray(&ray);
             // t could be `NaN`, in which case the following comparison will return `false`.
             if t <= d {
-                return Vec3::ZERO;
+                return Vec3A::ZERO;
             }
         }
         for triangle in self.scene.triangles.iter() {
@@ -131,7 +131,7 @@ impl<'a> RayTracer<'a> {
             if !Triangle::uv_is_inside(uv) {
                 continue;
             }
-            return Vec3::ZERO;
+            return Vec3A::ZERO;
         }
 
         let cos_theta = d_cos_theta / d;
@@ -139,21 +139,21 @@ impl<'a> RayTracer<'a> {
         point_light_factor_times_4pi * *light.power_over_4pi()
     }
 
-    pub fn compute_direct_lighting(&self, point: Vec3, normal: Vec3) -> Vec3 {
-        self.scene.lights.iter().fold(Vec3::ZERO, |acc, l| {
+    pub fn compute_direct_lighting(&self, point: Vec3A, normal: Vec3A) -> Vec3A {
+        self.scene.lights.iter().fold(Vec3A::ZERO, |acc, l| {
             acc + self.compute_direct_lighting_for_light(point, normal, l)
         })
     }
 
     pub fn compute_indirect_lighting(
         &self,
-        point: Vec3,
-        normal: Vec3,
+        point: Vec3A,
+        normal: Vec3A,
         rng: &mut SmallRng,
         recursion_level: u8,
-    ) -> Vec3 {
+    ) -> Vec3A {
         if recursion_level >= self.bounces {
-            return Vec3::ZERO;
+            return Vec3A::ZERO;
         }
 
         let (dir, cos_theta) = crate::random_unit_vector_in_hemisphere_and_cos_theta(normal, rng);
@@ -164,10 +164,10 @@ impl<'a> RayTracer<'a> {
         self.ray_trace_indirect(&next_ray, rng, recursion_level + 1) * cos_theta
     }
 
-    fn ray_trace_indirect(&self, ray: &Ray, rng: &mut SmallRng, recursion_level: u8) -> Vec3 {
+    fn ray_trace_indirect(&self, ray: &Ray, rng: &mut SmallRng, recursion_level: u8) -> Vec3A {
         let closest_hit = self.first_intersection_with_ray(ray);
         if closest_hit.t.is_nan() {
-            return Vec3::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2);
+            return Vec3A::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2);
         };
         let (intersection, normal, albedo) = closest_hit.intersection_normal_albedo(ray);
         let direct_lighting = self.compute_direct_lighting(intersection, normal);
@@ -177,15 +177,15 @@ impl<'a> RayTracer<'a> {
         albedo * (direct_lighting + indirect_lighting)
     }
 
-    pub fn ray_trace(&self, ray: &Ray, rng: &mut SmallRng) -> Vec3 {
+    pub fn ray_trace(&self, ray: &Ray, rng: &mut SmallRng) -> Vec3A {
         let closest_hit = self.first_intersection_with_ray(ray);
         if closest_hit.t.is_nan() {
-            return Vec3::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2);
+            return Vec3A::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2);
         };
         let (intersection, normal, albedo) = closest_hit.intersection_normal_albedo(ray);
         let direct_lighting = self.compute_direct_lighting(intersection, normal);
 
-        let mut indirect_lighting = Vec3::ZERO;
+        let mut indirect_lighting = Vec3A::ZERO;
 
         if self.aim_rays {
             let mut area_by_index: [(usize, f32); 10] = [(usize::MAX, 0.); 10];
@@ -302,7 +302,7 @@ impl<'a> RayTracer<'a> {
             let ambient_area = 2. * f32::consts::PI - total_area;
             if ambient_area > 0. {
                 let indirect_lighting_cos_theta_factor = 0.5;
-                indirect_lighting += Vec3::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2)
+                indirect_lighting += Vec3A::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2)
                     * indirect_lighting_cos_theta_factor
                     * ambient_area;
                 indirect_lighting_area += ambient_area;

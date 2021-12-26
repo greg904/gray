@@ -5,7 +5,7 @@ use core::mem;
 use core::ops::Range;
 
 use glam::IVec2;
-use glam::Vec3;
+use glam::Vec3A;
 
 pub struct Rasterizer {
     view_width: i32,
@@ -30,9 +30,9 @@ fn range_intersection(a: Range<i32>, b: Range<i32>) -> Range<i32> {
     }
 }
 
-fn clip_triangle<F>(mut p0: Vec3, mut p1: Vec3, mut p2: Vec3, z_near: f32, mut f: F)
+fn clip_triangle<F>(mut p0: Vec3A, mut p1: Vec3A, mut p2: Vec3A, z_near: f32, mut f: F)
 where
-    F: FnMut(Vec3, Vec3, Vec3),
+    F: FnMut(Vec3A, Vec3A, Vec3A),
 {
     // Sort the vertices by their Z coordinate.
     if p1.z < p0.z {
@@ -88,7 +88,7 @@ impl Rasterizer {
         }
     }
 
-    fn camera_space_to_view_space(&self, camera_space: Vec3) -> IVec2 {
+    fn camera_space_to_view_space(&self, camera_space: Vec3A) -> IVec2 {
         let mut view_space = camera_space.truncate();
         view_space *= -self.view_space_factor / camera_space.z;
         view_space.y = -view_space.y;
@@ -99,9 +99,9 @@ impl Rasterizer {
 
     fn fill_triangle_custom<F>(
         &mut self,
-        unclipped_p0: Vec3,
-        unclipped_p1: Vec3,
-        unclipped_p2: Vec3,
+        unclipped_p0: Vec3A,
+        unclipped_p1: Vec3A,
+        unclipped_p2: Vec3A,
         mut f: F,
     ) where
         F: FnMut(&mut Self, i32, i32, f32),
@@ -148,7 +148,7 @@ impl Rasterizer {
                         let b2 = (d00 * d21 - d01 * d20) / denom;
                         let b0 = 1. - b1 - b2;
                         // Get the perspective correct barycentric.
-                        let pc = Vec3::new(b0 / p0.z, b1 / p1.z, b2 / p2.z)
+                        let pc = Vec3A::new(b0 / p0.z, b1 / p1.z, b2 / p2.z)
                             / (b0 / p0.z + b1 / p1.z + b2 / p2.z);
                         f(this, x, y, pc.x * p0.z + pc.y * p1.z + pc.z * p2.z);
                     }
@@ -193,7 +193,7 @@ impl Rasterizer {
         )
     }
 
-    pub fn rasterize_triangle(&mut self, p0: Vec3, p1: Vec3, p2: Vec3, color: u32) {
+    pub fn rasterize_triangle(&mut self, p0: Vec3A, p1: Vec3A, p2: Vec3A, color: u32) {
         self.fill_triangle_custom(p0, p1, p2, |this, x, y, z| {
             let i = (y * this.view_width + x) as usize;
             if z > this.z[i] {
@@ -203,7 +203,7 @@ impl Rasterizer {
         });
     }
 
-    pub fn rasterize_sphere(&mut self, center: Vec3, r: f32, color: u32) {
+    pub fn rasterize_sphere(&mut self, center: Vec3A, r: f32, color: u32) {
         // A point on the projection of the sphere to the Z near plane satisfies the following equation:
         // (r^2 - y_O^2 - z_O^2)x^2 + 2x_Oy_Oxy + (r^2 - x_O^2 - z_O^2)y^2 - 2z_Oz_Nx_Ox - 2z_Oz_Ny_Oy - z_N^2(x_O^2 + y_O^2 - r^2) >= 0
         // TODO: find a way to draw this conic more efficiently

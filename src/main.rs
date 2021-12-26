@@ -31,8 +31,9 @@ use clap::ArgEnum;
 use clap::Parser;
 
 use glam::Affine3A;
+use glam::Mat3A;
 use glam::Mat3;
-use glam::Vec3;
+use glam::Vec3A;
 
 use minifb::Window;
 use minifb::WindowOptions;
@@ -49,13 +50,13 @@ const TILE_SIZE: u16 = 64;
 const BACKGROUND: (f32, f32, f32) = (0.471, 0.796, 0.957);
 
 pub struct Ray {
-    pub origin: Vec3,
-    pub dir: Vec3,
+    pub origin: Vec3A,
+    pub dir: Vec3A,
 }
 
-pub fn random_unit_vector_in_hemisphere_and_cos_theta(center: Vec3, rng: &mut SmallRng) -> (Vec3, f32) {
+pub fn random_unit_vector_in_hemisphere_and_cos_theta(center: Vec3A, rng: &mut SmallRng) -> (Vec3A, f32) {
     let v = UnitSphere.sample(rng);
-    let v = Vec3::new(v[0], v[1], v[2]);
+    let v = Vec3A::new(v[0], v[1], v[2]);
     let dot = v.dot(center);
     let sign = 1f32.copysign(dot);
     // Make sure that the vector is in the hemisphere.
@@ -63,23 +64,23 @@ pub fn random_unit_vector_in_hemisphere_and_cos_theta(center: Vec3, rng: &mut Sm
 }
 
 impl Ray {
-    pub fn point_from_t(&self, t: f32) -> Vec3 {
+    pub fn point_from_t(&self, t: f32) -> Vec3A {
         self.origin + t * self.dir
     }
 }
 
 pub struct Camera {
-    center: Vec3,
+    center: Vec3A,
     // Precomputed values for ray-tracing.
-    grid_center: Vec3,
-    grid_right: Vec3,
-    grid_up: Vec3,
+    grid_center: Vec3A,
+    grid_right: Vec3A,
+    grid_up: Vec3A,
     // Precomputed value for rasterization.
     transform: Affine3A,
 }
 
 impl Camera {
-    fn new(center: Vec3, dir: Vec3, z_near: f32, vertical_fov: f32) -> Self {
+    fn new(center: Vec3A, dir: Vec3A, z_near: f32, vertical_fov: f32) -> Self {
         let grid_center = center + z_near * dir;
         let grid_scale = (vertical_fov / 2.).tan() * z_near;
         let (d, l) = spherical::polar_and_azimuthal_vectors_from_radial_vector(dir);
@@ -87,13 +88,13 @@ impl Camera {
         let u = -d;
         let grid_right = grid_scale * r;
         let grid_up = grid_scale * u;
-        let rot_matrix = Mat3::from_cols(r, u, -dir).transpose();
+        let rot_matrix = Mat3::from_cols(r.into(), u.into(), (-dir).into()).transpose();
         Self {
             center,
             grid_center,
             grid_right,
             grid_up,
-            transform: Affine3A::from_mat3(rot_matrix) * Affine3A::from_translation(-center),
+            transform: Affine3A::from_mat3(rot_matrix) * Affine3A::from_translation((-center).into()),
         }
     }
 
@@ -116,18 +117,18 @@ fn f32_to_u8(f: f32) -> u8 {
     (f * 255.).clamp(0., 255.) as u8
 }
 
-fn gamma_encode(c: Vec3) -> Vec3 {
+fn gamma_encode(c: Vec3A) -> Vec3A {
     c.powf(0.45)
 }
 
-fn rrt_and_odf_fit(v: Vec3) -> Vec3 {
+fn rrt_and_odf_fit(v: Vec3A) -> Vec3A {
     // From https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl (MIT licensed).
     let a = v * (v + 0.0245786f32) - 0.000090537f32;
     let b = v * (0.983729f32 * v + 0.4329510f32) + 0.238081f32;
     a / b
 }
 
-fn aces_fit(color: Vec3) -> Vec3 {
+fn aces_fit(color: Vec3A) -> Vec3A {
     // From https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl (MIT licensed).
     let input_mat = Mat3::from_cols_array(&[
         0.59719f32, 0.07600f32, 0.02840f32, 0.35458f32, 0.90834f32, 0.13383f32, 0.04823f32,
@@ -205,41 +206,41 @@ fn main() {
 
     let scene = Arc::new(RwLock::new(Scene {
         spheres: vec![SphereObject {
-            sph: Sphere::new(Vec3::ZERO, 0.7),
+            sph: Sphere::new(Vec3A::ZERO, 0.7),
             mat: Material {
-                albedo: Vec3::new(1., 0., 0.),
+                albedo: Vec3A::new(1., 0., 0.),
             },
         }],
         triangles: vec![
             TriangleObject {
                 tri: Triangle::new((
-                    Vec3::new(-50., -50., -0.7),
-                    Vec3::new(50., -50., -0.7),
-                    Vec3::new(-50., 50., -0.7),
+                    Vec3A::new(-50., -50., -0.7),
+                    Vec3A::new(50., -50., -0.7),
+                    Vec3A::new(-50., 50., -0.7),
                 )),
                 mat: Material {
-                    albedo: Vec3::new(1., 1., 1.),
+                    albedo: Vec3A::new(1., 1., 1.),
                 },
             },
             TriangleObject {
                 tri: Triangle::new((
-                    Vec3::new(50., 50., -0.7),
-                    Vec3::new(-50., 50., -0.7),
-                    Vec3::new(50., -50., -0.7),
+                    Vec3A::new(50., 50., -0.7),
+                    Vec3A::new(-50., 50., -0.7),
+                    Vec3A::new(50., -50., -0.7),
                 )),
                 mat: Material {
-                    albedo: Vec3::new(1., 1., 1.),
+                    albedo: Vec3A::new(1., 1., 1.),
                 },
             },
         ],
-        primitives_avg_diffuse: vec![Vec3::ZERO; 3],
+        primitives_avg_diffuse: vec![Vec3A::ZERO; 3],
         lights: vec![Light::new(
-            Vec3::new(10., 17., 50.),
-            Vec3::new(8000., 8000., 8000.),
+            Vec3A::new(10., 17., 50.),
+            Vec3A::new(8000., 8000., 8000.),
         )],
         camera: Camera::new(
-            Vec3::new(-1.2, 0., 0.3),
-            Vec3::new(1., 0., -0.2).normalize(),
+            Vec3A::new(-1.2, 0., 0.3),
+            Vec3A::new(1., 0., -0.2).normalize(),
             0.1,
             80f32.to_radians(),
         ),
@@ -315,7 +316,7 @@ fn main() {
                             } else if obj < s.triangles.len() + s.spheres.len() {
                                 s.spheres[obj - s.triangles.len()].mat.albedo
                             } else {
-                                Vec3::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2)
+                                Vec3A::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2)
                             }
                         } else {
                             let x_unit = ((x as f32) - (WIDTH as f32) / 2.) / (HEIGHT as f32) * 2.;
@@ -387,16 +388,16 @@ fn main() {
 
             for (i, triangle) in s.triangles.iter().enumerate() {
                 r.rasterize_triangle(
-                    s.camera.transform.transform_point3(triangle.tri.a()),
-                    s.camera.transform.transform_point3(triangle.tri.b()),
-                    s.camera.transform.transform_point3(triangle.tri.c()),
+                    s.camera.transform.transform_point3a(triangle.tri.a()),
+                    s.camera.transform.transform_point3a(triangle.tri.b()),
+                    s.camera.transform.transform_point3a(triangle.tri.c()),
                     i as u32,
                 );
             }
 
             for (i, sphere) in s.spheres.iter().enumerate() {
                 r.rasterize_sphere(
-                    s.camera.transform.transform_point3(*sphere.sph.center()),
+                    s.camera.transform.transform_point3a(*sphere.sph.center()),
                     sphere.sph.radius(),
                     (i + s.triangles.len()) as u32,
                 );

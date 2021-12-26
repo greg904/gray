@@ -1,17 +1,17 @@
 use glam::Mat2;
 use glam::Vec2;
-use glam::Vec3;
+use glam::Vec3A;
 
 pub struct Triangle {
-    points: (Vec3, Vec3, Vec3),
-    normal: Vec3,
-    s_xyz: Vec3,
-    t_xyz: Vec3,
+    points: (Vec3A, Vec3A, Vec3A),
+    normal: Vec3A,
+    s_xyz: Vec3A,
+    t_xyz: Vec3A,
     uv_to_st: Mat2,
 }
 
 impl Triangle {
-    pub fn new(points: (Vec3, Vec3, Vec3)) -> Self {
+    pub fn new(points: (Vec3A, Vec3A, Vec3A)) -> Self {
         // We will need to find the UV coordinates of any point in the plane that contains the
         // triangle quickly. One way to do that is to create an orthonormal basis for the
         // points in the plane, because it will then be easy to get the
@@ -70,7 +70,7 @@ impl Triangle {
 
     /// Returns the UV coordinates of a point in space, assuming that the point is in the plane
     /// that contains the triangle.
-    pub fn uv_of_point(&self, p: Vec3) -> Vec2 {
+    pub fn uv_of_point(&self, p: Vec3A) -> Vec2 {
         // Get the coordinates of the point in the orthonormal basis.
         let point_xyz = p - self.points.0;
         let point_st = Vec2::new(point_xyz.dot(self.s_xyz), point_xyz.dot(self.t_xyz));
@@ -84,29 +84,29 @@ impl Triangle {
     }
 
     /// Converts UV coordinates to world coordinates.
-    pub fn point_from_uv(&self, uv: Vec2) -> Vec3 {
+    pub fn point_from_uv(&self, uv: Vec2) -> Vec3A {
         self.points.0
             + uv.x * (self.points.1 - self.points.0)
             + uv.y * (self.points.2 - self.points.0)
     }
 
-    pub fn normal(&self) -> Vec3 {
+    pub fn normal(&self) -> Vec3A {
         self.normal
     }
 
-    pub fn a(&self) -> Vec3 {
+    pub fn a(&self) -> Vec3A {
         self.points.0
     }
 
-    pub fn b(&self) -> Vec3 {
+    pub fn b(&self) -> Vec3A {
         self.points.1
     }
 
-    pub fn c(&self) -> Vec3 {
+    pub fn c(&self) -> Vec3A {
         self.points.2
     }
 
-    pub fn barycenter(&self) -> Vec3 {
+    pub fn barycenter(&self) -> Vec3A {
         (self.points.0 + self.points.1 + self.points.2) / 3.
     }
 }

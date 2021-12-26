@@ -1,15 +1,15 @@
 use core::f32;
 use core::mem;
 
-use glam::Vec3;
+use glam::Vec3A;
 
 use rand::distributions::Distribution;
 use rand::rngs::SmallRng;
 use rand::Rng;
 use rand_distr::UnitDisc;
 
-pub fn polar_and_azimuthal_vectors_from_radial_vector(radial_vector: Vec3) -> (Vec3, Vec3) {
-    let azimuthal_vector = Vec3::Z.cross(radial_vector).normalize();
+pub fn polar_and_azimuthal_vectors_from_radial_vector(radial_vector: Vec3A) -> (Vec3A, Vec3A) {
+    let azimuthal_vector = Vec3A::Z.cross(radial_vector).normalize();
     let polar_vector = azimuthal_vector.cross(radial_vector);
     (polar_vector, azimuthal_vector)
 }
@@ -20,7 +20,7 @@ pub fn area_of_sphere_projected_to_unit_sphere(sphere_d: f32, sphere_r: f32) -> 
     2. * f32::consts::PI * (1. - r.cos())
 }
 
-fn area_of_intersection_of_spherical_triangle_and_unit_sphere(a_: Vec3, b_: Vec3, c_: Vec3) -> f32 {
+fn area_of_intersection_of_spherical_triangle_and_unit_sphere(a_: Vec3A, b_: Vec3A, c_: Vec3A) -> f32 {
     // From https://math.stackexchange.com/a/66731.
     let a = b_.dot(c_).clamp(-1., 1.).acos();
     let b = c_.dot(a_).clamp(-1., 1.).acos();
@@ -34,15 +34,15 @@ fn area_of_intersection_of_spherical_triangle_and_unit_sphere(a_: Vec3, b_: Vec3
     area
 }
 
-fn translation_along_other_vector(start: Vec3, t: f32, t_dir: Vec3, actual_dir: Vec3) -> Vec3 {
+fn translation_along_other_vector(start: Vec3A, t: f32, t_dir: Vec3A, actual_dir: Vec3A) -> Vec3A {
     start + t / actual_dir.dot(t_dir) * actual_dir
 }
 
 pub fn area_of_intersection_of_spherical_triangle_and_unit_hemisphere(
-    mut a_: Vec3,
-    mut b_: Vec3,
-    mut c_: Vec3,
-    hemisphere_dir: Vec3,
+    mut a_: Vec3A,
+    mut b_: Vec3A,
+    mut c_: Vec3A,
+    hemisphere_dir: Vec3A,
 ) -> f32 {
     // TODO: Is there a better way to do this?
     let mut a_dot_hd = a_.dot(hemisphere_dir);
@@ -80,11 +80,11 @@ pub fn area_of_intersection_of_spherical_triangle_and_unit_hemisphere(
 }
 
 pub fn random_look_in_sphere(
-    from: Vec3,
-    sphere_center: Vec3,
+    from: Vec3A,
+    sphere_center: Vec3A,
     sphere_r: f32,
     rng: &mut SmallRng,
-) -> Vec3 {
+) -> Vec3A {
     // Make sure that we are outside the sphere as expected.
     assert!(from.distance_squared(sphere_center) > sphere_r * sphere_r);
     // We consider the cone tangent to the sphere, and use the idea from
@@ -103,7 +103,7 @@ pub fn random_look_in_sphere(
     from + d * (x * x_dir + y * y_dir + z * cone_dir)
 }
 
-pub fn random_direction_toward_triangle(a: Vec3, b: Vec3, c: Vec3, rng: &mut SmallRng) -> Vec3 {
+pub fn random_direction_toward_triangle(a: Vec3A, b: Vec3A, c: Vec3A, rng: &mut SmallRng) -> Vec3A {
     // We project the triangle's points to points on a unit sphere, and then pick a point
     // inside of the spherical triangle described by those points. As an approximation, we
     // can pick a point in the non-spherical triangle and normalize the vector instead.
@@ -126,7 +126,7 @@ mod tests {
     use crate::triangle::Triangle;
     use crate::Ray;
 
-    use glam::Vec3;
+    use glam::Vec3A;
 
     use rand::rngs::SmallRng;
     use rand::Rng;
@@ -136,12 +136,12 @@ mod tests {
     fn random_look_in_sphere() {
         let mut rng = SmallRng::seed_from_u64(0);
         for _ in 0..10 {
-            let sphere_center = rng.gen::<Vec3>() * 100. - 50.;
+            let sphere_center = rng.gen::<Vec3A>() * 100. - 50.;
             let sphere_r = rng.gen::<f32>() * 20.;
             let sphere = Sphere::new(sphere_center, sphere_r);
 
             let from = loop {
-                let candidate = rng.gen::<Vec3>() * 100. - 50.;
+                let candidate = rng.gen::<Vec3A>() * 100. - 50.;
                 if candidate.distance_squared(sphere_center) > sphere_r * sphere_r + 0.0001 {
                     break candidate;
                 }
@@ -161,14 +161,14 @@ mod tests {
     fn random_direction_toward_triangle() {
         let mut rng = SmallRng::seed_from_u64(0);
         for _ in 0..10 {
-            let a = rng.gen::<Vec3>() * 100. - 50.;
-            let b = rng.gen::<Vec3>() * 100. - 50.;
-            let c = rng.gen::<Vec3>() * 100. - 50.;
+            let a = rng.gen::<Vec3A>() * 100. - 50.;
+            let b = rng.gen::<Vec3A>() * 100. - 50.;
+            let c = rng.gen::<Vec3A>() * 100. - 50.;
             let tri = Triangle::new((a, b, c));
 
             let dir = super::random_direction_toward_triangle(a, b, c, &mut rng);
             let ray = Ray {
-                origin: Vec3::ZERO,
+                origin: Vec3A::ZERO,
                 dir,
             };
 

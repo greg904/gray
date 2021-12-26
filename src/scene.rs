@@ -5,7 +5,7 @@ use crate::triangle::Triangle;
 use crate::Camera;
 
 use glam::Vec2;
-use glam::Vec3;
+use glam::Vec3A;
 
 use rand::distributions::Distribution;
 use rand::rngs::SmallRng;
@@ -14,7 +14,7 @@ use rand::SeedableRng;
 use rand_distr::UnitSphere;
 
 pub struct Material {
-    pub albedo: Vec3,
+    pub albedo: Vec3A,
 }
 
 pub struct TriangleObject {
@@ -30,7 +30,7 @@ pub struct SphereObject {
 pub struct Scene {
     pub spheres: Vec<SphereObject>,
     pub triangles: Vec<TriangleObject>,
-    pub primitives_avg_diffuse: Vec<Vec3>,
+    pub primitives_avg_diffuse: Vec<Vec3A>,
     pub lights: Vec<Light>,
     pub camera: Camera,
 }
@@ -45,10 +45,10 @@ impl Scene {
         for i in 0..self.spheres.len() {
             let sphere = &self.spheres[i];
             let samples = 1;
-            let mut total_diffuse = Vec3::ZERO;
+            let mut total_diffuse = Vec3A::ZERO;
             for _ in 0..samples {
                 let offset: [f32; 3] = UnitSphere.sample(&mut rng);
-                let pt = Vec3::new(
+                let pt = Vec3A::new(
                     sphere.sph.center().x + sphere.sph.radius() * offset[0],
                     sphere.sph.center().y + sphere.sph.radius() * offset[1],
                     sphere.sph.center().z + sphere.sph.radius() * offset[2],
@@ -72,7 +72,7 @@ impl Scene {
         for i in 0..self.triangles.len() {
             let triangle = &self.triangles[i];
             let samples = 1;
-            let mut total_diffuse = Vec3::ZERO;
+            let mut total_diffuse = Vec3A::ZERO;
             for _ in 0..samples {
                 let uv: Vec2 = rng.gen();
                 let pt = triangle.tri.point_from_uv(uv);
