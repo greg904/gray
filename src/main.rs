@@ -1,10 +1,12 @@
 mod light;
+mod rasterize;
 mod sphere;
 mod spherical;
 mod triangle;
 mod view_tiles;
 
 use light::Light;
+use rasterize::Rasterizer;
 use sphere::Sphere;
 use triangle::Triangle;
 
@@ -21,7 +23,9 @@ use std::time::Instant;
 use clap::ArgEnum;
 use clap::Parser;
 
+use glam::Affine3A;
 use glam::Mat3;
+use glam::Mat3A;
 use glam::Vec2;
 use glam::Vec3;
 
@@ -87,24 +91,30 @@ struct SphereObject {
 
 struct Camera {
     center: Vec3,
-    // Precomputed values.
+    // Precomputed values for ray-tracing.
     grid_center: Vec3,
     grid_right: Vec3,
     grid_up: Vec3,
+    // Precomputed value for rasterization.
+    transform: Affine3A,
 }
 
 impl Camera {
     fn new(center: Vec3, dir: Vec3, z_near: f32, vertical_fov: f32) -> Self {
         let grid_center = center + z_near * dir;
-        let grid_scale = 2. * (vertical_fov / 2.).tan() * z_near;
-        let (grid_down, grid_left) = spherical::polar_and_azimuthal_vectors_from_radial_vector(dir);
-        let grid_right = -grid_scale * grid_left;
-        let grid_up = -grid_scale * grid_down;
+        let grid_scale = (vertical_fov / 2.).tan() * z_near;
+        let (d, l) = spherical::polar_and_azimuthal_vectors_from_radial_vector(dir);
+        let r = -l;
+        let u = -d;
+        let grid_right = grid_scale * r;
+        let grid_up = grid_scale * u;
+        let rot_matrix = Mat3::from_cols(r, u, -dir).transpose();
         Self {
             center,
             grid_center,
             grid_right,
             grid_up,
+            transform: Affine3A::from_mat3(rot_matrix) * Affine3A::from_translation(-center),
         }
     }
 
@@ -484,11 +494,16 @@ struct Args {
     /// The amount of light bounces per sample.
     #[clap(short, long, default_value = "3")]
     bounces: u8,
+
+    /// Use rasterization instead of the first ray.
+    #[clap(short, long)]
+    rasterize: bool,
 }
 
 fn main() {
     let args = Args::parse();
     let tone_map = args.tone_map;
+    let rasterize = args.rasterize;
 
     let mut window = Window::new("gray", WIDTH, HEIGHT, WindowOptions::default())
         .expect("failed to create window");
@@ -552,6 +567,13 @@ fn main() {
     let mut pixels: Vec<u32> = vec![0; WIDTH * HEIGHT];
     let pixels_ptr = SendMutPtr(pixels.as_mut_ptr());
 
+    let mut rasterizer = Arc::new(RwLock::new(Rasterizer::new(
+        WIDTH,
+        HEIGHT,
+        0.1,
+        80f32.to_radians(),
+    )));
+
     let mut worker_handles = Vec::new();
     let mut workers_running = Vec::new();
     for _ in 0..WORKER_COUNT {
@@ -563,6 +585,7 @@ fn main() {
         let tile_enqueued_ref = tile_enqueued.clone();
         let tile_dequeued_ref = tile_dequeued.clone();
         let scene_ref = scene.clone();
+        let rasterizer_ref = rasterizer.clone();
 
         worker_handles.push(thread::spawn(move || {
             let mut rng = SmallRng::from_entropy();
@@ -585,14 +608,30 @@ fn main() {
                 tile_dequeued_ref.notify_one();
 
                 let s = scene_ref.read().unwrap();
+                let r = rasterizer_ref.read().unwrap();
 
                 for y in tile.y_min..tile.y_max {
                     for x in tile.x_min..tile.x_max {
-                        let x_unit = ((x as f32) - (WIDTH as f32) / 2.) / (HEIGHT as f32) * 2.;
-                        let y_unit = ((y as f32) - (HEIGHT as f32) / 2.) / (HEIGHT as f32) * -2.;
-                        let ray = s.camera.ray_for_pixel(x_unit, y_unit);
+                        let i = isize::try_from(y).unwrap() * isize::try_from(WIDTH).unwrap()
+                            + isize::try_from(x).unwrap();
 
-                        let c = s.ray_trace(&ray, &mut rng);
+                        let c = if rasterize {
+                            let obj = r.color()[i as usize] as usize;
+                            if obj < s.triangles.len() {
+                                s.triangles[obj].mat.albedo
+                            } else if obj < s.triangles.len() + s.spheres.len() {
+                                s.spheres[obj - s.triangles.len()].mat.albedo
+                            } else {
+                                Vec3::new(BACKGROUND.0, BACKGROUND.1, BACKGROUND.2)
+                            }
+                        } else {
+                            let x_unit = ((x as f32) - (WIDTH as f32) / 2.) / (HEIGHT as f32) * 2.;
+                            let y_unit =
+                                ((y as f32) - (HEIGHT as f32) / 2.) / (HEIGHT as f32) * -2.;
+                            let ray = s.camera.ray_for_pixel(x_unit, y_unit);
+                            s.ray_trace(&ray, &mut rng)
+                        };
+
                         let c = match tone_map {
                             ToneMap::Linear => c,
                             ToneMap::GammaEncode => gamma_encode(c),
@@ -602,8 +641,6 @@ fn main() {
                             | ((f32_to_u8(c.y) as u32) << 8)
                             | (f32_to_u8(c.z) as u32);
 
-                        let i = isize::try_from(y).unwrap() * isize::try_from(WIDTH).unwrap()
-                            + isize::try_from(x).unwrap();
                         unsafe { *pixels_ptr.0.offset(i) = c };
                     }
                 }
@@ -636,6 +673,30 @@ fn main() {
         {
             let mut s = scene.write().unwrap();
             s.spheres[0].sph.center_mut().y = 0.3 * theta.cos();
+        }
+
+        {
+            let mut r = rasterizer.write().unwrap();
+            r.clear(u32::MAX);
+
+            let s = scene.read().unwrap();
+
+            for (i, triangle) in s.triangles.iter().enumerate() {
+                r.rasterize_triangle(
+                    s.camera.transform.transform_point3(triangle.tri.a()),
+                    s.camera.transform.transform_point3(triangle.tri.b()),
+                    s.camera.transform.transform_point3(triangle.tri.c()),
+                    i as u32,
+                );
+            }
+
+            for (i, sphere) in s.spheres.iter().enumerate() {
+                r.rasterize_sphere(
+                    s.camera.transform.transform_point3(*sphere.sph.center()),
+                    sphere.sph.radius(),
+                    (i + s.triangles.len()) as u32,
+                );
+            }
         }
 
         {
